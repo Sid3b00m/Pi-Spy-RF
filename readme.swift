@@ -1,10 +1,3 @@
-//
-//  readme.swift
-//  
-//
-//  Created by Bob on 10/25/25.
-//
-
 # Radio Scanner SDR
 
 A deployable radio scanner for Raspberry Pi or Ubuntu laptops, integrating WiFi surveillance detection (via Chasing-Your-Tail-NG) with broad-spectrum SDR scanning (120-950 MHz). Supports RTL-SDR v3/v4 and HackRF One.

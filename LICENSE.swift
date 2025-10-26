@@ -1,10 +1,3 @@
-//
-//  LICENSE.swift
-//  
-//
-//  Created by Bob on 10/25/25.
-//
-
 MIT License
 
 Copyright (c) 2025 [Your Name or Username]
