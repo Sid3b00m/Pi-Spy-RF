@@ -1,5 +1,3 @@
-# Auto detect text files and perform LF normalization
-* text=auto
 #!/bin/bash
 
 # Full Deployable Radio Scanner Setup Script for Raspberry Pi or Ubuntu Laptop
@@ -10,6 +8,11 @@
 # Added: NOAA Weather Radio decoding (SAME alerts and voice) on 162 MHz band
 # Added: NOAA Satellite APT decoding on 137 MHz band - decodes satellite weather images
 # Added: Doppler correction for APT images using slant correction via sync alignment
+#
+# Limitations:
+# - HackRF APT decoding is partial (IQ capture works, but full FM demod requires GNU Radio or similar; placeholder used).
+# - For full satellite passes, increase record_duration (e.g., 600s for 10min).
+# - Ensure SDR hardware is connected and drivers installed.
 #
 # Usage:
 # 1. Save this as setup_scanner.sh
@@ -35,7 +38,7 @@ THRESHOLD_DB=-50      # Signal detection threshold
 
 # NOAA specific
 NOAA_FREQS=(162400000 162425000 162450000 162475000 162500000 162525000 162550000)
-NOAA_APT_FREQS=(137100000 137620000 137912500)  # Common NOAA APT frequencies
+NOAA_APT_FREQS=(137100000 137620000 137912500)  # NOAA-19, NOAA-15, NOAA-18
 
 # Function to install dependencies
 install_deps() {
@@ -172,244 +175,4 @@ class RadioScanner:
         while current_freq < self.freq_end:
             if self.use_hackrf:
                 # Use hackrf_sweep for spectrum scan
-                cmd = f"hackrf_sweep -f {int(current_freq/1e6)}:{int((current_freq+self.scan_step)/1e6)} -w {int(self.sample_rate)} -g {int(self.gain)} -1"
-                output = subprocess.check_output(cmd, shell=True).decode()
-                # Parse output (simplified)
-                for line in output.splitlines():
-                    if "dBm" in line:
-                        parts = line.split()
-                        freq = float(parts[0])
-                        power = float(parts[-1])
-                        if power > self.threshold_db:
-                            det = {'freq': freq*1e6, 'power': power, 'type': self.classify(freq*1e6)}
-                            detections.append(det)
-                            logger.info(f"HackRF detected: {det}")
-            else:
-                self.sdr.center_freq = current_freq
-                samples = self.sdr.read_samples(1024*256)
-                f, pxx = signal.welch(samples, fs=self.sample_rate, nperseg=1024)
-                pxx_db = 10 * np.log10(pxx)
-                peaks = np.where(pxx_db > self.threshold_db)[0]
-                if len(peaks) > 0:
-                    for peak in peaks:
-                        peak_freq = f[peak] + current_freq - self.sample_rate/2
-                        det = {'freq': peak_freq, 'power': pxx_db[peak], 'type': self.classify(peak_freq)}
-                        detections.append(det)
-                        logger.info(f"RTL detected: {det}")
-            
-            current_freq += self.scan_step
-        return detections
-    
-    def classify(self, freq):
-        freq_mhz = freq / 1e6
-        if 88 <= freq_mhz <= 108: return "FM Broadcast (Analog Voice)"
-        if 118 <= freq_mhz <= 137: return "Aircraft AM (Analog Voice)"
-        if 137 <= freq_mhz <= 138: return "NOAA APT Satellite Image"
-        if 162 <= freq_mhz <= 163: return "NOAA Weather Radio (FM Voice + SAME)"
-        if 929 <= freq_mhz <= 932: return "Paging (Digital - POCSAG/FLEX)"
-        return "Unknown Signal"
-    
-    def decode_digital(self, freq, mode='POCSAG'):
-        cmd = f"rtl_fm -f {freq} -s 22050 -g {self.gain} | multimon-ng -a {mode} -t raw -"
-        if self.use_hackrf:
-            cmd = cmd.replace("rtl_fm", f"hackrf_transfer -r - -f {int(freq)} -s 8000000 | sox -t raw -r 8m -e signed -b 8 -c 1 - -r 22050 -t raw - | multimon-ng...")
-        return subprocess.check_output(cmd, shell=True, timeout=10).decode(errors='ignore')
-    
-    def decode_noaa(self, freq):
-        """Decode NOAA Weather Radio - SAME alerts using multimon-ng EAS"""
-        cmd = f"rtl_fm -M fm -f {freq} -s 22050 -g {self.gain} | multimon-ng -a EAS -t raw -"
-        if self.use_hackrf:
-            cmd = cmd.replace("rtl_fm", f"hackrf_transfer -r - -f {int(freq)} -s 8000000 | sox -t raw -r 8m -e signed -b 8 -c 1 - -r 22050 -t raw - | multimon-ng...")
-        try:
-            output = subprocess.check_output(cmd, shell=True, timeout=30).decode(errors='ignore')
-            return output
-        except subprocess.TimeoutExpired:
-            return "Timeout - No SAME alert decoded"
-        except Exception as e:
-            logger.error(f"NOAA decode error: {e}")
-            return "Decode failed"
-    
-    def decode_apt(self, freq, record_duration=60):
-        """Decode NOAA APT satellite image from signal"""
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        wav_file = f"noaa_apt_{timestamp}_{int(freq/1e3)}kHz.wav"
-        png_file = wav_file.replace('.wav', '.png')
-        
-        logger.info(f"Recording APT signal at {freq/1e6} MHz for {record_duration} seconds...")
-        
-        # Record FM demodulated audio for APT (sample rate 41600 Hz typical for APT)
-        # Tune with 25kHz offset to avoid DC spike in RTL-SDR
-        tune_freq = freq + 25000
-        if not self.use_hackrf:
-            cmd = f"rtl_fm -M fm -f {tune_freq} -s 41600 -g {self.gain} -p 0 | sox -t raw -r 41600 -es -b16 -c1 - {wav_file} trim 0 {record_duration}"
-        else:
-            # For HackRF - capture IQ and process (simplified, may need adjustment)
-            iq_file = wav_file.replace('.wav', '.iq')
-            cmd = f"hackrf_transfer -r {iq_file} -f {int(tune_freq)} -s 41600 -a 1 -l {int(self.gain)} -g 0 -n {41600 * record_duration}"
-            subprocess.run(cmd, shell=True)
-            # Then demod (placeholder, needs proper FM demod)
-            cmd = f"sox -t raw -r 41600 -es -b8 -c2 {iq_file} -t wav {wav_file} rate 11025"  # Incomplete
-            logger.warning("HackRF APT decoding not fully implemented - using placeholder")
-        
-        subprocess.run(cmd, shell=True)
-        
-        # Decode with noaa-apt CLI
-        apt_cmd = f"noaa-apt {wav_file} -o {png_file}"
-        result = subprocess.run(apt_cmd, shell=True, capture_output=True)
-        if result.returncode == 0:
-            logger.info(f"Decoded APT image saved to: {png_file}")
-            # Apply Doppler slant correction
-            self.correct_slant(png_file)
-        else:
-            logger.error(f"APT decode failed: {result.stderr.decode()}")
-    
-    def correct_slant(self, png_file):
-        """Apply simple Doppler slant correction by aligning sync bars"""
-        try:
-            img = plt.imread(png_file)
-            if len(img.shape) == 3:
-                img = img[:, :, 0]  # Take red channel as grayscale
-            height, width = img.shape
-            
-            # Average top and bottom rows to find sync positions (assume sync in left 200 pixels)
-            left, right = 0, 200
-            top_avg = np.mean(img[0:100, left:right], axis=0)
-            bottom_avg = np.mean(img[-100:, left:right], axis=0)
-            
-            # Find position of minimum intensity (sync bar is dark)
-            top_sync = np.argmin(top_avg)
-            bottom_sync = np.argmin(bottom_avg)
-            
-            shift_diff = bottom_sync - top_sync
-            logger.info(f"Detected sync shift: {shift_diff} pixels")
-            
-            # Linearly interpolate shifts
-            shifts = np.linspace(0, shift_diff, height)
-            
-            # Shift each row
-            corrected_img = np.zeros_like(img)
-            for i in range(height):
-                corrected_img[i] = nd_shift(img[i], -shifts[i], mode='nearest')
-            
-            # Save corrected image
-            corrected_file = png_file.replace('.png', '_corrected.png')
-            plt.imsave(corrected_file, corrected_img, cmap='gray')
-            logger.info(f"Doppler slant correction applied, saved to: {corrected_file}")
-        except Exception as e:
-            logger.error(f"Slant correction failed: {e}")
-    
-    def demod_analog(self, freq, mode='FM'):
-        cmd = f"rtl_fm -M {mode.lower()} -f {freq} -s 200k -g {self.gain} | play -r 32k -t raw -e s -b 16 -c 1 -V1 -"
-        if self.use_hackrf:
-            cmd = cmd.replace("rtl_fm", f"hackrf_transfer -r - -f {int(freq)} -s 8000000 | sox...")
-        subprocess.run(cmd, shell=True, timeout=30)
-    
-    def scan_noaa_freqs(self):
-        """Scan specific NOAA frequencies for strong signals"""
-        strong_noaa = []
-        for freq in self.noaa_freqs:
-            if self.use_hackrf:
-                cmd = f"hackrf_sweep -f {int(freq/1e6-1)}:{int(freq/1e6+1)} -w 1000000 -g {int(self.gain)} -1"
-                output = subprocess.check_output(cmd, shell=True).decode()
-                for line in output.splitlines():
-                    if "dBm" in line:
-                        parts = line.split()
-                        power = float(parts[-1])
-                        if power > self.threshold_db + 10:  # Stronger threshold for NOAA
-                            strong_noaa.append(freq)
-            else:
-                self.sdr.center_freq = freq
-                samples = self.sdr.read_samples(1024*256)
-                pxx = np.abs(np.fft.fft(samples))**2
-                pxx_db = 10 * np.log10(pxx)
-                if np.max(pxx_db) > self.threshold_db + 10:
-                    strong_noaa.append(freq)
-        return strong_noaa
-    
-    def scan_apt_freqs(self):
-        """Scan NOAA APT frequencies for active satellite signals"""
-        active_apt = []
-        for freq in self.noaa_apt_freqs:
-            if self.use_hackrf:
-                cmd = f"hackrf_sweep -f {int(freq/1e6-1)}:{int(freq/1e6+1)} -w 1000000 -g {int(self.gain)} -1"
-                output = subprocess.check_output(cmd, shell=True).decode()
-                for line in output.splitlines():
-                    if "dBm" in line:
-                        parts = line.split()
-                        power = float(parts[-1])
-                        if power > self.threshold_db + 5:  # APT signals can be weaker
-                            active_apt.append(freq)
-            else:
-                self.sdr.center_freq = freq
-                samples = self.sdr.read_samples(1024*256)
-                pxx = np.abs(np.fft.fft(samples))**2
-                pxx_db = 10 * np.log10(pxx)
-                if np.max(pxx_db) > self.threshold_db + 5:
-                    active_apt.append(freq)
-        return active_apt
-    
-    def run_wifi_analysis(self):
-        load_appearances_from_kismet(self.config['paths']['kismet_db'], self.detector)
-        suspicious = self.detector.analyze_surveillance_patterns()
-        for dev in suspicious:
-            logger.warning(f"Suspicious WiFi: {dev.mac} score {dev.persistence_score}")
-    
-    def run(self, duration=300):
-        self.init_sdr()
-        start = time.time()
-        while time.time() - start < duration:
-            # Scan for strong NOAA ground stations first
-            strong_noaa = self.scan_noaa_freqs()
-            for freq in strong_noaa:
-                logger.info(f"Strong NOAA Weather signal at {freq/1e6} MHz")
-                same_decode = self.decode_noaa(freq)
-                if same_decode.strip():
-                    logger.info(f"NOAA SAME Alert: {same_decode}")
-                # Optionally demod voice for 30s
-                # self.demod_analog(freq, mode='fm')
-            
-            # Scan for active NOAA APT satellite signals
-            active_apt = self.scan_apt_freqs()
-            for freq in active_apt:
-                logger.info(f"Active NOAA APT satellite signal at {freq/1e6} MHz - starting decode")
-                self.decode_apt(freq, record_duration=60)  # Record 60s for testing; increase for full passes
-            
-            detections = self.scan_spectrum()
-            for det in detections:
-                if 'Digital' in det['type']:
-                    decode = self.decode_digital(det['freq'])
-                    logger.info(f"Decoded at {det['freq']/1e6} MHz: {decode[:100]}...")
-                elif 'Analog Voice' in det['type']:
-                    self.demod_analog(det['freq'])
-                elif 'NOAA Weather' in det['type']:
-                    same_decode = self.decode_noaa(det['freq'])
-                    if same_decode.strip():
-                        logger.info(f"NOAA SAME: {same_decode}")
-                    # self.demod_analog(det['freq'], mode='fm')
-                elif 'NOAA APT' in det['type']:
-                    self.decode_apt(det['freq'])
-            self.run_wifi_analysis()
-            time.sleep(60)
-
-if __name__ == '__main__':
-    scanner = RadioScanner('config.json', use_hackrf=False)  # Set to True for HackRF
-    scanner.run()
-EOF
-}
-
-# Parse arguments
-case "$1" in
-    --install)
-        install_deps "$2"
-        ;;
-    --run)
-        run_scanner
-        ;;
-    --hackrf)
-        install_deps "--hackrf"
-        run_scanner  # Modify to use HackRF in Python via sed or env var
-        ;;
-    *)
-        echo "Usage: $0 --install [--hackrf] | --run | --hackrf"
-        ;;
-esac
+                cmd = f"hackrf_sweep -f {int(current_freq/1e6)}:{int((current_freq+self.scan_step)/1e6)} -w {int(self.sample
