@@ -10,6 +10,7 @@ from fastapi.templating import Jinja2Templates
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.api.routes import router as api_router
+from app.core.security import SECURITY_HEADERS
 from app.core.auth import (
     COOKIE,
     attach_session_cookie,
@@ -31,7 +32,7 @@ from app.core.wireless import init_wireless_tables, list_wireless, wireless_work
 
 APP_DIR = Path(__file__).resolve().parent
 
-app = FastAPI(title="Pi-Spy-RF", version="0.7.0")
+app = FastAPI(title="Pi-Spy-RF", version="0.8.0")
 app.include_router(api_router)
 app.mount("/static", StaticFiles(directory=APP_DIR / "static"), name="static")
 templates = Jinja2Templates(directory=str(APP_DIR / "templates"))
@@ -54,6 +55,17 @@ class AuthMiddleware(BaseHTTPMiddleware):
 app.add_middleware(AuthMiddleware)
 
 
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+        for key, value in SECURITY_HEADERS.items():
+            response.headers.setdefault(key, value)
+        return response
+
+
+app.add_middleware(SecurityHeadersMiddleware)
+
+
 @app.on_event("startup")
 def on_startup() -> None:
     (ROOT / "data").mkdir(parents=True, exist_ok=True)
@@ -68,10 +80,11 @@ def login_page(request: Request, error: str | None = None):
 
 
 @app.post("/login")
-def login_submit(username: str = Form(...), password: str = Form(...)):
+def login_submit(request: Request, username: str = Form(...), password: str = Form(...)):
     if not auth_enabled():
         return RedirectResponse("/", status_code=302)
-    if not verify_login(username, password):
+    client = request.client.host if request.client else "unknown"
+    if not verify_login(username, password, client_key=client):
         return RedirectResponse("/login?error=1", status_code=302)
     token = create_session()
     resp = RedirectResponse("/", status_code=302)
@@ -108,14 +121,32 @@ def dashboard(request: Request):
 
 
 def main() -> None:
+    import logging
+    import os
+
     cfg = get_config()
+    log = logging.getLogger("pi-spy-rf")
+    logging.basicConfig(level=logging.INFO)
     (ROOT / "data").mkdir(parents=True, exist_ok=True)
     init_db()
     init_wireless_tables()
     ensure_mini_oui()
+
+    host = cfg.server.host
+    if host in ("0.0.0.0", "::") and not auth_enabled():
+        log.warning(
+            "Listening on %s:%s with auth DISABLED. "
+            "Any LAN client can control SDR workers. "
+            "Set auth.enabled=true and PI_SPY_PASSWORD, or bind host to 127.0.0.1.",
+            host,
+            cfg.server.port,
+        )
+    if os.environ.get("PI_SPY_NO_DEMO") == "1":
+        log.info("PI_SPY_NO_DEMO=1 — demo SDR placeholders disabled")
+
     uvicorn.run(
         "app.main:app",
-        host=cfg.server.host,
+        host=host,
         port=cfg.server.port,
         reload=False,
     )

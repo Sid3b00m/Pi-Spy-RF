@@ -2,7 +2,7 @@
 
 Web-based multi-SDR RF suite for **Raspberry Pi** — spectrum scanning, digital decode, WiFi/Bluetooth catalog, and a browser dashboard reachable from any device on your LAN.
 
-**Version:** 0.7.0
+**Version:** 0.8.0
 
 ---
 
@@ -12,6 +12,8 @@ Web-based multi-SDR RF suite for **Raspberry Pi** — spectrum scanning, digital
 |-------|-------------|
 | **[Install Guide (INSTALL.md)](INSTALL.md)** | Full step-by-step Pi setup, troubleshooting, DSD, auth |
 | **[Online docs](https://sid3b00m.github.io/Pi-Spy-RF/)** | Install guide on GitHub Pages |
+| **[Platforms (Mac/Win/Linux)](docs/platforms.md)** | How to run on every OS |
+| **[SECURITY.md](SECURITY.md)** | Hardening notes and LAN advice |
 | **[ROADMAP.md](ROADMAP.md)** | Planned features |
 
 ---
@@ -51,6 +53,14 @@ run.bat
 ```
 
 Open http://127.0.0.1:8080 — demo mode runs without SDR hardware.
+
+### macOS / Linux (no systemd)
+
+```bash
+chmod +x run.sh && ./run.sh
+```
+
+Full matrix and package notes: [docs/platforms.md](docs/platforms.md). Security: [SECURITY.md](SECURITY.md).
 
 ---
 

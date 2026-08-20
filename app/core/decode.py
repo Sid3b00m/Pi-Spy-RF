@@ -13,6 +13,7 @@ from typing import Any
 from app.core.db import add_event
 from app.core.balance import require_role
 from app.core.devices import list_radio_devices
+from app.core.security import clamp_duration_s, clamp_freq_mhz, validate_device_id
 from app.core.modes import (
     MODE_BY_ID,
     SUPPORTED_MODES,
@@ -146,14 +147,17 @@ class DecodeWorker:
         mode = (mode or "auto").lower().strip()
         if mode not in SUPPORTED_MODES:
             raise ValueError(f"mode must be one of {SUPPORTED_MODES}")
+        freq_mhz = clamp_freq_mhz(freq_mhz)
+        duration_s = clamp_duration_s(duration_s)
+        device_id = validate_device_id(device_id)
         job = DecodeJob(
             id=str(uuid.uuid4())[:8],
-            freq_mhz=float(freq_mhz),
+            freq_mhz=freq_mhz,
             mode=mode,
             status="queued",
             device_id=device_id,
             created_at=datetime.now(timezone.utc).isoformat(),
-            duration_s=max(2.0, float(duration_s)),
+            duration_s=duration_s,
         )
         with self._lock:
             self._queue.append(job)

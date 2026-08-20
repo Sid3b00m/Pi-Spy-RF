@@ -278,7 +278,11 @@ class WirelessWorker:
 
     def _scan_wifi_iw(self) -> int:
         cfg = get_config()
-        iface = (cfg.wifi or {}).get("interface") or "wlan0"
+        raw_iface = (cfg.wifi or {}).get("interface") or "wlan0"
+        try:
+            iface = validate_iface(str(raw_iface))
+        except ValueError:
+            return self._scan_wifi_demo()
         p = subprocess.run(
             ["iw", "dev", iface, "scan"],
             capture_output=True,

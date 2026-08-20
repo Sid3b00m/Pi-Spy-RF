@@ -73,7 +73,7 @@ class KnownMac(BaseModel):
 
 @router.get("/health")
 def health():
-    return {"ok": True, "service": "pi-spy-rf", "version": "0.7.0"}
+    return {"ok": True, "service": "pi-spy-rf", "version": "0.8.0"}
 
 
 @router.get("/host")
@@ -253,13 +253,23 @@ def events(limit: int = 50):
 
 @router.post("/events")
 def create_event(body: EventCreate):
+    kind = (body.kind or "").strip()[:64]
+    summary = (body.summary or "").strip()[:500]
+    if not kind or not summary:
+        raise HTTPException(400, "kind and summary are required")
+    source = (body.source or None)
+    if source is not None:
+        source = str(source).strip()[:128] or None
+    mode = (body.mode or None)
+    if mode is not None:
+        mode = str(mode).strip()[:64] or None
     event_id = add_event(
-        body.kind,
-        body.summary,
-        source=body.source,
+        kind,
+        summary,
+        source=source,
         freq_hz=body.freq_hz,
-        mode=body.mode,
-        meta=body.meta,
+        mode=mode,
+        meta=body.meta if isinstance(body.meta, dict) else None,
     )
     return {"ok": True, "id": event_id}
 

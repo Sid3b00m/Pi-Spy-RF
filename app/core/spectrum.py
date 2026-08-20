@@ -14,6 +14,7 @@ from app.core.db import add_event
 from app.core.balance import require_role
 from app.core.devices import list_radio_devices
 from app.core.decode import decode_worker
+from app.core.security import clamp_freq_mhz, clamp_interval_s, clamp_spectrum_range, validate_device_id
 
 
 @dataclass
@@ -92,18 +93,20 @@ class SpectrumWorker:
         device_id: str | None = None,
     ) -> None:
         with self._lock:
-            if start_mhz is not None:
-                self._start_mhz = float(start_mhz)
-            if end_mhz is not None:
-                self._end_mhz = float(end_mhz)
+            start = self._start_mhz if start_mhz is None else float(start_mhz)
+            end = self._end_mhz if end_mhz is None else float(end_mhz)
+            if start_mhz is not None or end_mhz is not None:
+                start, end = clamp_spectrum_range(start, end)
+                self._start_mhz = start
+                self._end_mhz = end
             if step_mhz is not None:
-                self._step_mhz = max(0.1, float(step_mhz))
+                self._step_mhz = max(0.1, min(50.0, float(step_mhz)))
             if interval_s is not None:
-                self._interval_s = max(1.0, float(interval_s))
+                self._interval_s = clamp_interval_s(interval_s)
             if threshold_db is not None:
-                self._threshold_db = float(threshold_db)
+                self._threshold_db = max(-120.0, min(0.0, float(threshold_db)))
             if device_id is not None:
-                self._device_id = device_id
+                self._device_id = validate_device_id(device_id)
 
     def start(self) -> dict[str, Any]:
         with self._lock:

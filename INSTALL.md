@@ -4,6 +4,8 @@ Step-by-step setup for **Raspberry Pi 3 / 4 / 5** running Raspberry Pi OS (Bookw
 
 Estimated time: **15–30 minutes** (plus optional DSD build time).
 
+> **Not only for Pi:** the same app runs on **Linux, macOS, and Windows** (demo mode without SDR). See [docs/platforms.md](docs/platforms.md) and [SECURITY.md](SECURITY.md).
+
 ---
 
 ## What you need

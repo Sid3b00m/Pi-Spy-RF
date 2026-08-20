@@ -10,6 +10,7 @@ from fastapi import Request
 from fastapi.responses import RedirectResponse
 
 from app.core.config import get_config
+from app.core.security import login_limiter
 
 COOKIE = "pi_spy_session"
 _sessions: dict[str, datetime] = {}
@@ -30,7 +31,9 @@ def auth_enabled() -> bool:
     return bool(_password())
 
 
-def verify_login(username: str, password: str) -> bool:
+def verify_login(username: str, password: str, *, client_key: str | None = None) -> bool:
+    if client_key and not login_limiter.allow(client_key):
+        return False
     cfg = get_config().auth
     expected_user = cfg.username or "ops"
     expected_pass = _password()
@@ -75,11 +78,13 @@ def public_path(path: str) -> bool:
 
 
 def attach_session_cookie(response, token: str) -> None:
+    secure = os.environ.get("PI_SPY_SECURE_COOKIE", "").strip() in ("1", "true", "yes")
     response.set_cookie(
         COOKIE,
         token,
         httponly=True,
         samesite="lax",
+        secure=secure,
         max_age=SESSION_HOURS * 3600,
     )
 

@@ -1,11 +1,13 @@
 server:
-  host: "0.0.0.0"
+  # Use 127.0.0.1 for local-only. Use 0.0.0.0 to allow LAN access (enable auth!).
+  host: "127.0.0.1"
   port: 8080
 
 auth:
+  # REQUIRED when host is 0.0.0.0 / LAN-exposed
   enabled: false
   username: "ops"
-  password: ""
+  password: ""   # prefer env: PI_SPY_PASSWORD
 
 database:
   path: "data/pi_spy.db"
@@ -18,7 +20,7 @@ devices:
       role: decode
 
 wifi:
-  interface: "wlan0"
+  interface: "wlan0"   # Linux; Windows/macOS may fall back to demo without nmcli/iw
   enabled: true
 
 bluetooth:
