@@ -4,25 +4,21 @@ Web-based multi-SDR RF suite for **Raspberry Pi** — spectrum scanning, digital
 
 **Version:** 0.7.0
 
-![Python](https://img.shields.io/badge/python-3.11+-blue)
-![Platform](https://img.shields.io/badge/platform-Raspberry%20Pi-red)
-![License](https://img.shields.io/badge/license-MIT-green)
+---
+
+## Documentation
+
+| Guide | Description |
+|-------|-------------|
+| **[Install Guide (INSTALL.md)](INSTALL.md)** | Full step-by-step Pi setup, troubleshooting, DSD, auth |
+| **[Online docs](https://sid3b00m.github.io/Pi-Spy-RF/)** | Same guides on GitHub Pages |
+| **[ROADMAP.md](ROADMAP.md)** | Planned features |
 
 ---
 
-## Features
+## Quick install (Raspberry Pi)
 
-- **Multi-SDR management** — RTL-SDR, HackRF, Soapy; role assignment (scan / decode / idle)
-- **Live spectrum** — waterfall, peak detect, band classification, event log
-- **Digital decode** — POCSAG, FLEX, DMR, P25, NXDN, and more (mode catalog in UI)
-- **Load balancing** — auto-assign sticks (RTL scan, HackRF decode)
-- **Wireless catalog** — WiFi + Bluetooth observation, OUI lookup, known MAC tagging
-- **Optional LAN auth** — simple password gate for shared networks
-- **Demo mode** — runs on Windows/macOS without hardware for development
-
----
-
-## Quick start (Raspberry Pi)
+Copy and paste on a fresh **Raspberry Pi OS** system:
 
 ```bash
 sudo apt update && sudo apt install -y git
@@ -32,9 +28,17 @@ chmod +x install.sh run.sh
 sudo ./install.sh
 ```
 
-Then open **`http://<your-pi-ip>:8080`** in a browser.
+Open the dashboard from any device on your network:
 
-**Full step-by-step guide:** [INSTALL.md](INSTALL.md)
+```text
+http://<your-pi-ip>:8080
+```
+
+Find your Pi IP: `hostname -I`
+
+The installer sets up rtl-sdr, multimon-ng, Python dependencies, config, and a **systemd service** so Pi-Spy-RF starts on boot.
+
+**Need more detail?** See [INSTALL.md](INSTALL.md) or [docs/installation.md](docs/installation.md).
 
 ---
 
@@ -46,7 +50,18 @@ cd Pi-Spy-RF
 run.bat
 ```
 
-Open http://127.0.0.1:8080
+Open http://127.0.0.1:8080 — demo mode runs without SDR hardware.
+
+---
+
+## Features
+
+- **Multi-SDR management** — RTL-SDR, HackRF, Soapy; role assignment (scan / decode / idle)
+- **Live spectrum** — waterfall, peak detect, band classification, event log
+- **Digital decode** — POCSAG, FLEX, DMR, P25, NXDN, and more
+- **Load balancing** — auto-assign sticks (RTL scan, HackRF decode)
+- **Wireless catalog** — WiFi + Bluetooth observation, OUI lookup, known MAC tagging
+- **Optional LAN auth** — password gate for shared networks
 
 ---
 
@@ -61,18 +76,34 @@ Open http://127.0.0.1:8080
 
 ---
 
+## After install
+
+1. Confirm SDR sticks appear under **Devices**
+2. Click **Auto-assign** in the load balance panel
+3. Start **Spectrum** and **Decode** workers
+4. Optional: enable auth in `config/config.yaml` and set `PI_SPY_PASSWORD`
+
+Service commands:
+
+```bash
+sudo systemctl status pi-spy-rf
+sudo systemctl restart pi-spy-rf
+journalctl -u pi-spy-rf -f
+```
+
+---
+
 ## Project layout
 
 ```text
 Pi-Spy-RF/
   app/              FastAPI backend + dashboard UI
-  config/           config.example.yaml → config.yaml
+  config/           config.example.yaml -> config.yaml
   data/             SQLite DB, OUI seed, known MACs
-  scripts/          systemd unit
+  docs/             GitHub Pages documentation
   install.sh        One-shot Pi installer
-  run.sh / run.bat  Manual start scripts
   INSTALL.md        Detailed install guide
-  archive/          Legacy bash scanner (reference)
+  run.sh / run.bat  Manual start scripts
 ```
 
 ---
