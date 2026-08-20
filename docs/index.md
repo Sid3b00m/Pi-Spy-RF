@@ -20,7 +20,7 @@ Then open **`http://<your-pi-ip>:8080`** in a browser (`hostname -I` on the Pi).
 
 ## Guides
 
-- [Installation guide](installation.html) — full step-by-step setup, DSD, auth, troubleshooting
+- [Installation guide](installation.md) — full step-by-step setup, DSD, auth, troubleshooting
 - [GitHub repository](https://github.com/Sid3b00m/Pi-Spy-RF)
 - [INSTALL.md on GitHub](https://github.com/Sid3b00m/Pi-Spy-RF/blob/main/INSTALL.md)
 
