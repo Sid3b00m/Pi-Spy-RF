@@ -150,14 +150,20 @@ def spectrum_status():
 
 @router.post("/spectrum/config")
 def spectrum_config(body: SpectrumConfig):
-    spectrum_worker.configure(**body.model_dump(exclude_none=True))
+    try:
+        spectrum_worker.configure(**body.model_dump(exclude_none=True))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
     return spectrum_worker.status()
 
 
 @router.post("/spectrum/start")
 def spectrum_start(body: SpectrumConfig | None = None):
     if body:
-        spectrum_worker.configure(**body.model_dump(exclude_none=True))
+        try:
+            spectrum_worker.configure(**body.model_dump(exclude_none=True))
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
     return spectrum_worker.start()
 
 
