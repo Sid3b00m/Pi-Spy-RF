@@ -2,7 +2,9 @@
 
 Pi-Spy-RF is designed for **trusted LAN / lab use**. Treat it like any SDR control panel: if someone can reach the web UI without auth, they can start spectrum scans, queue decodes, and run wireless scans.
 
-Version **0.8.0** includes a hardening pass for multi-OS deployment (Linux, macOS, Windows, Raspberry Pi).
+Version **0.8.1** applies Claude review fixes (deadlocks, nmcli parse, device cache, insecure LAN refuse).
+
+Version **0.8.0** included a hardening pass for multi-OS deployment (Linux, macOS, Windows, Raspberry Pi).
 
 ---
 
@@ -18,7 +20,7 @@ This app runs local subprocesses (`rtl_power`, `rtl_fm`, `multimon-ng`, `nmcli`,
 
 ---
 
-## Hardening changes (0.8.0)
+## Hardening changes (0.8.0 / 0.8.1)
 
 1. **Default bind** in `config.example.yaml` is `127.0.0.1` (local only). Open LAN only when you enable auth.
 2. **Startup warning** if listening on `0.0.0.0` / `::` with auth disabled.
@@ -74,3 +76,12 @@ $env:PI_SPY_PASSWORD = "choose-a-long-password"
 ## Reporting issues
 
 Open a GitHub issue on https://github.com/Sid3b00m/Pi-Spy-RF with steps to reproduce. Do not post live credentials.
+
+
+### Insecure LAN override
+
+To force bind `0.0.0.0` without auth (lab only):
+
+```bash
+export PI_SPY_ALLOW_INSECURE_LAN=1
+```

@@ -2,7 +2,7 @@
 
 Web-based multi-SDR RF suite for **Raspberry Pi** — spectrum scanning, digital decode, WiFi/Bluetooth catalog, and a browser dashboard reachable from any device on your LAN.
 
-**Version:** 0.8.0
+**Version:** 0.8.1
 
 ---
 

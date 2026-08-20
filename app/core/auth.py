@@ -39,8 +39,14 @@ def verify_login(username: str, password: str, *, client_key: str | None = None)
     expected_pass = _password()
     if not expected_pass:
         return False
-    user_ok = hmac.compare_digest(username.strip(), expected_user)
-    pass_ok = hmac.compare_digest(password, expected_pass)
+    user_ok = hmac.compare_digest(
+        username.strip().encode("utf-8"),
+        expected_user.encode("utf-8"),
+    )
+    pass_ok = hmac.compare_digest(
+        password.encode("utf-8"),
+        expected_pass.encode("utf-8"),
+    )
     return user_ok and pass_ok
 
 

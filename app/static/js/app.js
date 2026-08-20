@@ -1,3 +1,12 @@
+async function apiFetch(url, options) {
+  const res = await fetch(url, options);
+  if (res.status === 401) {
+    window.location = "/login";
+    throw new Error("auth required");
+  }
+  return res;
+}
+
 function escapeHtml(s) {
   return String(s)
     .replaceAll("&", "&amp;")
@@ -16,7 +25,7 @@ function roleOptions(roles, selected) {
 }
 
 async function refreshDevices() {
-  const res = await fetch("/api/devices");
+  const res = await apiFetch("/api/devices");
   const data = await res.json();
   const root = document.getElementById("device-list");
   if (!root) return;
@@ -44,7 +53,7 @@ async function refreshDevices() {
 }
 
 async function refreshEvents() {
-  const res = await fetch("/api/events?limit=30");
+  const res = await apiFetch("/api/events?limit=30");
   const data = await res.json();
   const list = document.getElementById("event-list");
   if (!list) return;
@@ -64,7 +73,7 @@ async function refreshEvents() {
 }
 
 async function setRole(deviceId, role) {
-  const res = await fetch(`/api/devices/${encodeURIComponent(deviceId)}/role`, {
+  const res = await apiFetch(`/api/devices/${encodeURIComponent(deviceId)}/role`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ role }),
@@ -170,7 +179,7 @@ function renderPeaks(peaks) {
 }
 
 async function refreshSpectrum() {
-  const res = await fetch("/api/spectrum");
+  const res = await apiFetch("/api/spectrum");
   const data = await res.json();
   const meta = document.getElementById("spectrum-meta");
   const status = document.getElementById("spectrum-status");
@@ -193,7 +202,7 @@ async function startSpectrum() {
     end_mhz: Number(document.getElementById("spec-end").value),
     threshold_db: Number(document.getElementById("spec-thresh").value),
   };
-  await fetch("/api/spectrum/start", {
+  await apiFetch("/api/spectrum/start", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
@@ -203,7 +212,7 @@ async function startSpectrum() {
 }
 
 async function stopSpectrum() {
-  await fetch("/api/spectrum/stop", { method: "POST" });
+  await apiFetch("/api/spectrum/stop", { method: "POST" });
   await refreshSpectrum();
   await refreshEvents();
 }
@@ -222,7 +231,7 @@ document.getElementById("spectrum-stop")?.addEventListener("click", () => {
 });
 document.getElementById("spectrum-config")?.addEventListener("submit", async (ev) => {
   ev.preventDefault();
-  await fetch("/api/spectrum/config", {
+  await apiFetch("/api/spectrum/config", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -237,7 +246,7 @@ document.getElementById("spectrum-config")?.addEventListener("submit", async (ev
 document.getElementById("classify-form")?.addEventListener("submit", async (ev) => {
   ev.preventDefault();
   const mhz = Number(document.getElementById("freq-input").value);
-  const res = await fetch("/api/bands/classify", {
+  const res = await apiFetch("/api/bands/classify", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ freq_mhz: mhz }),
@@ -257,7 +266,7 @@ setInterval(() => {
 }, 3000);
 
 async function refreshDecode() {
-  const res = await fetch("/api/decode");
+  const res = await apiFetch("/api/decode");
   const data = await res.json();
   const meta = document.getElementById("decode-meta");
   const status = document.getElementById("decode-status");
@@ -294,18 +303,18 @@ async function refreshDecode() {
 }
 
 document.getElementById("decode-start")?.addEventListener("click", async () => {
-  await fetch("/api/decode/start", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+  await apiFetch("/api/decode/start", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
   await refreshDecode();
   await refreshEvents();
 });
 document.getElementById("decode-stop")?.addEventListener("click", async () => {
-  await fetch("/api/decode/stop", { method: "POST" });
+  await apiFetch("/api/decode/stop", { method: "POST" });
   await refreshDecode();
   await refreshEvents();
 });
 document.getElementById("decode-form")?.addEventListener("submit", async (ev) => {
   ev.preventDefault();
-  await fetch("/api/decode/enqueue", {
+  await apiFetch("/api/decode/enqueue", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -321,8 +330,27 @@ document.getElementById("decode-form")?.addEventListener("submit", async (ev) =>
 refreshDecode().catch(console.error);
 
 async function refreshWireless() {
-  const statusRes = await fetch("/api/wireless");
+  let banner = document.getElementById("demo-banner");
+  if (!banner) {
+    banner = document.createElement("div");
+    banner.id = "demo-banner";
+    banner.style.cssText = "display:none;margin:0.5rem 0;padding:0.5rem 0.75rem;background:#3b2f1a;color:#f0d78c;border:1px solid #8a6d2f;";
+    const main = document.querySelector("main") || document.body;
+    main.prepend(banner);
+  }
+
+  const statusRes = await apiFetch("/api/wireless");
   const status = await statusRes.json();
+  const bannerEl = document.getElementById("demo-banner");
+  if (bannerEl) {
+    if (status.demo) {
+      bannerEl.style.display = "block";
+      bannerEl.textContent = "Demo wireless data — nmcli/iw/bluetoothctl not available on this OS. Not live scan results.";
+    } else {
+      bannerEl.style.display = "none";
+    }
+  }
+
   const meta = document.getElementById("wireless-meta");
   const statusEl = document.getElementById("wireless-status");
   if (statusEl) statusEl.textContent = JSON.stringify(status, null, 2);
@@ -331,8 +359,8 @@ async function refreshWireless() {
       ? `Running · wifi=${status.counts?.wifi || 0} bt=${status.counts?.bluetooth || 0} · last ${status.last_scan?.ts || "?"}`
       : `Idle${status.error ? " · " + status.error : ""}`;
   }
-  const wifiRes = await fetch("/api/wireless/devices?kind=wifi&limit=50");
-  const btRes = await fetch("/api/wireless/devices?kind=bluetooth&limit=50");
+  const wifiRes = await apiFetch("/api/wireless/devices?kind=wifi&limit=50");
+  const btRes = await apiFetch("/api/wireless/devices?kind=bluetooth&limit=50");
   const wifi = await wifiRes.json();
   const bt = await btRes.json();
   const wifiBody = document.getElementById("wifi-body");
@@ -363,7 +391,7 @@ async function refreshWireless() {
 }
 
 async function refreshKnownMacs() {
-  const res = await fetch("/api/macs/known");
+  const res = await apiFetch("/api/macs/known");
   const data = await res.json();
   const body = document.getElementById("mac-body");
   if (!body) return;
@@ -380,7 +408,7 @@ async function refreshKnownMacs() {
     .join("");
   body.querySelectorAll("[data-del-mac]").forEach((btn) => {
     btn.onclick = async () => {
-      await fetch("/api/macs/known/" + encodeURIComponent(btn.dataset.delMac), { method: "DELETE" });
+      await apiFetch("/api/macs/known/" + encodeURIComponent(btn.dataset.delMac), { method: "DELETE" });
       await refreshKnownMacs();
       await refreshWireless();
     };
@@ -388,18 +416,18 @@ async function refreshKnownMacs() {
 }
 
 document.getElementById("wireless-start")?.addEventListener("click", async () => {
-  await fetch("/api/wireless/start", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+  await apiFetch("/api/wireless/start", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
   await refreshWireless();
   await refreshEvents();
 });
 document.getElementById("wireless-stop")?.addEventListener("click", async () => {
-  await fetch("/api/wireless/stop", { method: "POST" });
+  await apiFetch("/api/wireless/stop", { method: "POST" });
   await refreshWireless();
   await refreshEvents();
 });
 document.getElementById("known-mac-form")?.addEventListener("submit", async (ev) => {
   ev.preventDefault();
-  await fetch("/api/macs/known", {
+  await apiFetch("/api/macs/known", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -417,7 +445,7 @@ refreshWireless().catch(console.error);
 refreshKnownMacs().catch(console.error);
 
 async function refreshBalance() {
-  const res = await fetch("/api/devices/balance");
+  const res = await apiFetch("/api/devices/balance");
   const data = await res.json();
   const scan = (data.scan && data.scan[0]) || null;
   const dec = (data.decode && data.decode[0]) || null;
@@ -436,7 +464,7 @@ async function refreshBalance() {
 }
 
 document.getElementById("balance-apply")?.addEventListener("click", async () => {
-  await fetch("/api/devices/balance", { method: "POST" });
+  await apiFetch("/api/devices/balance", { method: "POST" });
   await refreshBalance();
   await refreshDevices();
   await refreshEvents();
@@ -449,7 +477,7 @@ async function fillDecodeModes() {
   const sel = document.getElementById("dec-mode");
   if (!sel) return;
   try {
-    const res = await fetch("/api/decode/modes");
+    const res = await apiFetch("/api/decode/modes");
     const data = await res.json();
     const current = sel.value;
     sel.innerHTML = (data.modes || [])

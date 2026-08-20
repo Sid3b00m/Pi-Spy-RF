@@ -58,6 +58,8 @@ class DecodeJob:
 class DecodeWorker:
     """Background decode queue bound to role=decode SDR (or demo)."""
 
+    MAX_QUEUE = 200
+
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._thread: threading.Thread | None = None
@@ -72,18 +74,21 @@ class DecodeWorker:
 
     def status(self) -> dict[str, Any]:
         with self._lock:
-            return {
-                "running": self._running,
-                "device_id": self._device_id,
-                "auto_from_spectrum": self._auto_from_spectrum,
-                "supported_modes": list(SUPPORTED_MODES),
-                "mode_catalog": list_modes(),
-                "queue_len": len(self._queue),
-                "error": self._error,
-                "current": self._job_dict(self._current) if self._current else None,
-                "queue": [self._job_dict(j) for j in self._queue[:20]],
-                "recent": [self._job_dict(j) for j in self._history[:30]],
-            }
+            return self._status_unlocked()
+
+    def _status_unlocked(self) -> dict[str, Any]:
+        return {
+            "running": self._running,
+            "device_id": self._device_id,
+            "auto_from_spectrum": self._auto_from_spectrum,
+            "supported_modes": list(SUPPORTED_MODES),
+            "mode_catalog": list_modes(),
+            "queue_len": len(self._queue),
+            "error": self._error,
+            "current": self._job_dict(self._current) if self._current else None,
+            "queue": [self._job_dict(j) for j in self._queue[:20]],
+            "recent": [self._job_dict(j) for j in self._history[:30]],
+        }
 
     def _job_dict(self, job: DecodeJob) -> dict[str, Any]:
         d = asdict(job)
@@ -94,45 +99,45 @@ class DecodeWorker:
             if auto_from_spectrum is not None:
                 self._auto_from_spectrum = bool(auto_from_spectrum)
             if device_id is not None:
-                self._device_id = device_id
+                self._device_id = validate_device_id(device_id)
 
     def start(self) -> dict[str, Any]:
         with self._lock:
             if self._running:
-                return self.status()
+                return self._status_unlocked()
             device = self._pick_decode_device_unlocked()
             if not device:
                 self._error = "No device with role=decode"
-                return {
-                    "running": False,
-                    "error": self._error,
-                    "device_id": None,
-                }
+                return self._status_unlocked()
             self._device_id = device["id"]
             self._error = None
             self._stop.clear()
             self._running = True
             self._thread = threading.Thread(target=self._loop, name="decode-worker", daemon=True)
             self._thread.start()
+            device_id = self._device_id
         add_event(
             "decode_start",
-            f"Decode worker started on {self._device_id}",
-            source=self._device_id,
+            f"Decode worker started on {device_id}",
+            source=device_id,
         )
         return self.status()
 
     def stop(self) -> dict[str, Any]:
         with self._lock:
             if not self._running:
-                return self.status()
+                return self._status_unlocked()
             self._stop.set()
             thread = self._thread
             device_id = self._device_id
         if thread and thread.is_alive():
             thread.join(timeout=5)
         with self._lock:
-            self._running = False
-            self._thread = None
+            if thread is not None and thread.is_alive():
+                self._error = "Decode worker still stopping (SDR tool busy)"
+            else:
+                self._running = False
+                self._thread = None
         add_event("decode_stop", f"Decode worker stopped ({device_id})", source=device_id)
         return self.status()
 
@@ -160,6 +165,8 @@ class DecodeWorker:
             duration_s=duration_s,
         )
         with self._lock:
+            if len(self._queue) >= self.MAX_QUEUE:
+                raise ValueError(f"decode queue full (max {self.MAX_QUEUE})")
             self._queue.append(job)
         add_event(
             "decode_queued",
@@ -401,7 +408,12 @@ class DecodeWorker:
     def _parse_dsd_text(self, mode: str, raw: str) -> DecodeResult:
         import re
 
-        enc = "encrypt" in raw.lower() or "enc" in raw.lower()
+        low = raw.lower()
+        enc = bool(
+            re.search(r"(?m)^\s*(encrypted|encryption|enc\s*[:=])", low)
+            or "encrypted" in low
+            or "privacy" in low and "on" in low
+        )
         def grab(patterns):
             for pat in patterns:
                 m = re.search(pat, raw, re.I)

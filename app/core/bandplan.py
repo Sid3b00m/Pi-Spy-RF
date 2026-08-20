@@ -41,7 +41,8 @@ def classify_mhz(freq_mhz: float) -> dict:
             "mode_hint": "unknown",
             "label": "Unknown / outside loaded band plan",
         }
-    primary = hits[0]
+    # Prefer the narrowest matching band when overlaps exist
+    primary = min(hits, key=lambda b: (b.end_mhz - b.start_mhz))
     return {
         "freq_mhz": freq_mhz,
         "bands": [asdict(b) for b in hits],

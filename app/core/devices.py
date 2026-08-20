@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import os
+import time
+import threading
 import platform
 import re
 import shutil
@@ -45,8 +47,7 @@ def _detect_rtl() -> list[RadioDevice]:
     devices: list[RadioDevice] = []
     if not shutil.which("rtl_test"):
         return devices
-    code, out, err = _run(["rtl_test",
-        "rtl_power", "-t"], timeout=8.0)
+    code, out, err = _run(["rtl_test", "-t"], timeout=8.0)
     text = out + "\n" + err
     for m in re.finditer(r"(\d+):\s+(.+?),\s+SN:\s*(\S+)", text):
         idx, name, serial = m.group(1), m.group(2).strip(), m.group(3)
@@ -177,7 +178,28 @@ def list_tools() -> dict[str, bool]:
     return {n: bool(shutil.which(n)) for n in names}
 
 
-def list_radio_devices() -> list[dict[str, Any]]:
+_DEVICE_CACHE_TTL_S = 20.0
+_device_cache_lock = threading.Lock()
+_device_cache_at = 0.0
+_device_cache: list[dict[str, Any]] = []
+
+
+def list_radio_devices(*, refresh: bool = False) -> list[dict[str, Any]]:
+    """Enumerate SDR devices with a short TTL cache (USB probes are expensive)."""
+    global _device_cache_at, _device_cache
+    now = time.time()
+    with _device_cache_lock:
+        if not refresh and _device_cache and (now - _device_cache_at) < _DEVICE_CACHE_TTL_S:
+            # Re-apply roles from DB (cheap) onto cached hardware list
+            roles = get_device_roles()
+            out = []
+            for item in _device_cache:
+                row = dict(item)
+                if row["id"] in roles:
+                    row["role"] = roles[row["id"]]
+                out.append(row)
+            return out
+
     found: list[RadioDevice] = []
     found.extend(_detect_rtl())
     found.extend(_detect_hackrf())
@@ -201,6 +223,10 @@ def list_radio_devices() -> list[dict[str, Any]]:
         if d.id in roles:
             item["role"] = roles[d.id]
         out.append(item)
+
+    with _device_cache_lock:
+        _device_cache = [dict(x) for x in out]
+        _device_cache_at = time.time()
     return out
 
 

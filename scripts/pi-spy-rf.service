@@ -7,10 +7,16 @@ Wants=network-online.target
 Type=simple
 User=pi
 WorkingDirectory=/home/pi/Pi-Spy-RF
+# Prefer: EnvironmentFile=-/etc/pi-spy-rf.env  (chmod 600) with PI_SPY_PASSWORD=...
 Environment=PI_SPY_PASSWORD=
 ExecStart=/home/pi/Pi-Spy-RF/.venv/bin/python -m app.main
 Restart=on-failure
 RestartSec=5
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/pi/Pi-Spy-RF/data /home/pi/Pi-Spy-RF/config
 
 [Install]
 WantedBy=multi-user.target

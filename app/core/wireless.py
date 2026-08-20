@@ -14,7 +14,8 @@ from typing import Any
 from app.core.config import ROOT, get_config
 from app.core.db import add_event, get_db
 from app.core.devices import list_radio_devices
-from app.core.mac_db import lookup_oui, load_known_macs, save_known_macs
+from app.core.mac_db import lookup_oui, load_known_macs
+from app.core.security import clamp_interval_s, validate_iface
 
 
 @dataclass
@@ -142,24 +143,29 @@ class WirelessWorker:
         self._running = False
         self._interval_s = 5.0
         self._error: str | None = None
-        self._wifi_enabled = True
-        self._bt_enabled = True
+        cfg = get_config()
+        self._wifi_enabled = bool((cfg.wifi or {}).get("enabled", True))
+        self._bt_enabled = bool((cfg.bluetooth or {}).get("enabled", True))
         self._last_scan: dict[str, Any] = {}
 
     def status(self) -> dict[str, Any]:
         with self._lock:
-            return {
-                "running": self._running,
-                "interval_s": self._interval_s,
-                "wifi_enabled": self._wifi_enabled,
-                "bt_enabled": self._bt_enabled,
-                "error": self._error,
-                "last_scan": self._last_scan,
-                "counts": {
-                    "wifi": len(list_wireless("wifi", 500)),
-                    "bluetooth": len(list_wireless("bluetooth", 500)),
-                },
-            }
+            return self._status_unlocked()
+
+    def _status_unlocked(self) -> dict[str, Any]:
+        return {
+            "running": self._running,
+            "interval_s": self._interval_s,
+            "wifi_enabled": self._wifi_enabled,
+            "bt_enabled": self._bt_enabled,
+            "error": self._error,
+            "last_scan": self._last_scan,
+            "demo": bool((self._last_scan or {}).get("demo")),
+            "counts": {
+                "wifi": len(list_wireless("wifi", 500)),
+                "bluetooth": len(list_wireless("bluetooth", 500)),
+            },
+        }
 
     def configure(
         self,
@@ -170,7 +176,7 @@ class WirelessWorker:
     ) -> None:
         with self._lock:
             if interval_s is not None:
-                self._interval_s = max(2.0, float(interval_s))
+                self._interval_s = max(2.0, clamp_interval_s(interval_s))
             if wifi_enabled is not None:
                 self._wifi_enabled = bool(wifi_enabled)
             if bt_enabled is not None:
@@ -180,7 +186,7 @@ class WirelessWorker:
         init_wireless_tables()
         with self._lock:
             if self._running:
-                return self.status()
+                return self._status_unlocked()
             self._error = None
             self._stop.clear()
             self._running = True
@@ -192,14 +198,17 @@ class WirelessWorker:
     def stop(self) -> dict[str, Any]:
         with self._lock:
             if not self._running:
-                return self.status()
+                return self._status_unlocked()
             self._stop.set()
             thread = self._thread
         if thread and thread.is_alive():
             thread.join(timeout=5)
         with self._lock:
-            self._running = False
-            self._thread = None
+            if thread is not None and thread.is_alive():
+                self._error = "Wireless worker still stopping"
+            else:
+                self._running = False
+                self._thread = None
         add_event("wireless_stop", "WiFi/BT discovery worker stopped")
         return self.status()
 
@@ -212,10 +221,17 @@ class WirelessWorker:
                 if self._bt_enabled:
                     bt_n = self._scan_bluetooth()
                 with self._lock:
+                    demo = (not shutil.which("nmcli") and not shutil.which("iw")) or (
+                        not shutil.which("bluetoothctl") and self._bt_enabled
+                    )
+                    # More accurate: demo if both counts came from demo helpers is hard;
+                    # flag when Linux wireless tools are missing.
+                    tools_missing = not (shutil.which("nmcli") or shutil.which("iw") or shutil.which("bluetoothctl"))
                     self._last_scan = {
                         "ts": datetime.now(timezone.utc).isoformat(),
                         "wifi": wifi_n,
                         "bluetooth": bt_n,
+                        "demo": tools_missing,
                     }
                     self._error = None
             except Exception as exc:  # noqa: BLE001
@@ -234,9 +250,11 @@ class WirelessWorker:
 
     def _scan_wifi_nmcli(self) -> int:
         p = subprocess.run(
-            ["nmcli", "-t", "-f", "SSID,BSSID,CHAN,SIGNAL", "dev", "wifi"],
+            ["nmcli", "-t", "--escape", "no", "-f", "SSID,BSSID,CHAN,SIGNAL", "dev", "wifi"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=15,
             check=False,
         )
@@ -244,11 +262,12 @@ class WirelessWorker:
             return self._scan_wifi_demo()
         count = 0
         for line in p.stdout.splitlines():
-            parts = line.split(":")
+            cleaned = line.replace("\\:", ":")
+            parts = cleaned.split(":")
             if len(parts) < 4:
                 continue
             ssid, bssid, chan, signal = parts[0], parts[1], parts[2], parts[3]
-            mac = bssid.replace("\\:", ":").upper()
+            mac = bssid.replace("-", ":").upper()
             if not re.match(r"^([0-9A-F]{2}:){5}[0-9A-F]{2}$", mac):
                 continue
             vendor, known = _enrich(mac, "wifi")

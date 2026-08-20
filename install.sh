@@ -3,7 +3,7 @@
 set -euo pipefail
 
 INSTALL_DIR="${INSTALL_DIR:-$(cd "$(dirname "$0")" && pwd)}"
-SERVICE_USER="${SERVICE_USER:-$USER}"
+SERVICE_USER="${SERVICE_USER:-${SUDO_USER:-$(id -un)}}"
 ENABLE_SERVICE="${ENABLE_SERVICE:-1}"
 INSTALL_RF_TOOLS="${INSTALL_RF_TOOLS:-1}"
 
@@ -73,6 +73,7 @@ fi
 
 IP=$(hostname -I 2>/dev/null | awk '{print $1}')
 log "Done."
-log "Dashboard: http://${IP:-127.0.0.1}:8080"
+log "Default bind is 127.0.0.1 (see config). Local: http://127.0.0.1:8080"
+log "For LAN access: set server.host=0.0.0.0, enable auth, then open http://${IP:-<pi-ip>}:8080"
 log "Manual start: cd $INSTALL_DIR && ./run.sh"
 log "Full guide: $INSTALL_DIR/INSTALL.md"

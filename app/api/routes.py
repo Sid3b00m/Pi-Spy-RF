@@ -65,15 +65,15 @@ class WirelessConfig(BaseModel):
 
 
 class KnownMac(BaseModel):
-    mac: str
-    name: str
-    type: str = "unknown"
-    notes: str = ""
+    mac: str = Field(..., max_length=32)
+    name: str = Field(..., max_length=128)
+    type: str = Field(default="unknown", max_length=32)
+    notes: str = Field(default="", max_length=500)
 
 
 @router.get("/health")
 def health():
-    return {"ok": True, "service": "pi-spy-rf", "version": "0.8.0"}
+    return {"ok": True, "service": "pi-spy-rf", "version": "0.8.1"}
 
 
 @router.get("/host")
@@ -87,8 +87,8 @@ def tools():
 
 
 @router.get("/devices")
-def devices():
-    return {"devices": list_radio_devices(), "roles": list(VALID_ROLES)}
+def devices(refresh: bool = False):
+    return {"devices": list_radio_devices(refresh=refresh), "roles": list(VALID_ROLES)}
 
 
 @router.put("/devices/{device_id}/role")
@@ -202,7 +202,9 @@ def decode_enqueue(body: DecodeEnqueue):
     try:
         job = decode_worker.enqueue(body.freq_mhz, mode=mode, duration_s=body.duration_s)
     except ValueError as exc:
-        raise HTTPException(400, str(exc)) from exc
+        msg = str(exc)
+        code = 429 if "queue full" in msg.lower() else 400
+        raise HTTPException(code, msg) from exc
     return {
         "ok": True,
         "job": {

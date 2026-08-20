@@ -32,7 +32,7 @@ from app.core.wireless import init_wireless_tables, list_wireless, wireless_work
 
 APP_DIR = Path(__file__).resolve().parent
 
-app = FastAPI(title="Pi-Spy-RF", version="0.8.0")
+app = FastAPI(title="Pi-Spy-RF", version="0.8.1")
 app.include_router(api_router)
 app.mount("/static", StaticFiles(directory=APP_DIR / "static"), name="static")
 templates = Jinja2Templates(directory=str(APP_DIR / "templates"))
@@ -133,19 +133,27 @@ def main() -> None:
     ensure_mini_oui()
 
     host = cfg.server.host
+    allow_insecure = os.environ.get("PI_SPY_ALLOW_INSECURE_LAN", "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+    )
     if host in ("0.0.0.0", "::") and not auth_enabled():
-        log.warning(
-            "Listening on %s:%s with auth DISABLED. "
-            "Any LAN client can control SDR workers. "
-            "Set auth.enabled=true and PI_SPY_PASSWORD, or bind host to 127.0.0.1.",
-            host,
-            cfg.server.port,
+        msg = (
+            f"Refusing to bind {host}:{cfg.server.port} with auth disabled. "
+            "Enable auth (auth.enabled + PI_SPY_PASSWORD), bind 127.0.0.1, "
+            "or set PI_SPY_ALLOW_INSECURE_LAN=1 to override."
         )
+        if allow_insecure:
+            log.warning(msg + " Override accepted.")
+        else:
+            log.error(msg)
+            raise SystemExit(2)
     if os.environ.get("PI_SPY_NO_DEMO") == "1":
         log.info("PI_SPY_NO_DEMO=1 — demo SDR placeholders disabled")
 
     uvicorn.run(
-        "app.main:app",
+        app,
         host=host,
         port=cfg.server.port,
         reload=False,

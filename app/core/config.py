@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -12,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 class ServerConfig(BaseModel):
-    host: str = "0.0.0.0"
+    host: str = "127.0.0.1"
     port: int = 8080
 
 
@@ -48,13 +47,28 @@ def _load_yaml(path: Path) -> dict[str, Any]:
     return data
 
 
-@lru_cache
-def get_config() -> AppConfig:
+def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
+    out = dict(base)
+    for key, value in override.items():
+        if key in out and isinstance(out[key], dict) and isinstance(value, dict):
+            out[key] = _deep_merge(out[key], value)
+        else:
+            out[key] = value
+    return out
+
+
+_config: AppConfig | None = None
+
+
+def get_config(*, refresh: bool = False) -> AppConfig:
+    global _config
+    if _config is not None and not refresh:
+        return _config
     example = ROOT / "config" / "config.example.yaml"
     local = ROOT / "config" / "config.yaml"
-    merged = _load_yaml(example)
-    merged.update(_load_yaml(local))
-    return AppConfig.model_validate(merged)
+    merged = _deep_merge(_load_yaml(example), _load_yaml(local))
+    _config = AppConfig.model_validate(merged)
+    return _config
 
 
 def db_path() -> Path:
