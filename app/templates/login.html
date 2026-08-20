@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Pi-Spy-RF login</title>
+  <link rel="stylesheet" href="/static/css/app.css" />
+</head>
+<body class="login-body">
+  <form class="login-card" method="post" action="/login">
+    <p class="brand">Pi-Spy-RF</p>
+    <h1>Sign in</h1>
+    <p class="sub">LAN gate for the radio ops dashboard</p>
+    {% if error %}
+    <p class="empty">Wrong username or password.</p>
+    {% endif %}
+    {% if not auth_on %}
+    <p class="meta">Auth is off. Set auth.enabled and a password in config.yaml (or PI_SPY_PASSWORD).</p>
+    {% endif %}
+    <label>Username <input name="username" autocomplete="username" required /></label>
+    <label>Password <input name="password" type="password" autocomplete="current-password" required /></label>
+    <button type="submit">Enter</button>
+  </form>
+</body>
+</html>

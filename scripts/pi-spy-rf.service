@@ -1,0 +1,16 @@
+[Unit]
+Description=Pi-Spy-RF web SDR suite
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/Pi-Spy-RF
+Environment=PI_SPY_PASSWORD=
+ExecStart=/home/pi/Pi-Spy-RF/.venv/bin/python -m app.main
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

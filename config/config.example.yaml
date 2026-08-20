@@ -1,0 +1,33 @@
+server:
+  host: "0.0.0.0"
+  port: 8080
+
+auth:
+  enabled: false
+  username: "ops"
+  password: ""
+
+database:
+  path: "data/pi_spy.db"
+
+devices:
+  prefer:
+    - type: rtl-sdr
+      role: scan
+    - type: hackrf
+      role: decode
+
+wifi:
+  interface: "wlan0"
+  enabled: true
+
+bluetooth:
+  enabled: true
+
+mac_db:
+  oui_path: "data/oui.txt"
+  known_path: "data/known_macs.json"
+
+decode:
+  enabled: true
+  auto_from_spectrum: true

@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Pi-Spy-RF</title>
+  <link rel="stylesheet" href="/static/css/app.css" />
+</head>
+<body>
+  <header class="top">
+    <div>
+      <p class="brand">Pi-Spy-RF</p>
+      <h1>Radio ops dashboard</h1>
+      <p class="sub">Phase 6 — dedicated scan vs decode SDRs</p>
+    </div>
+    <div class="host-chip">
+      <span>{{ host.node }}</span>
+      <span>{{ host.system }} {{ host.machine }}</span>
+      <span>Python {{ host.python }}</span>
+      {% if auth_on %}<a class="logout" href="/logout">Log out</a>{% endif %}
+    </div>
+  </header>
+
+  <main class="grid">
+    <section class="panel wide">
+      <div class="panel-head">
+        <h2>Spectrum</h2>
+        <div class="btn-row">
+          <button id="spectrum-start" type="button">Start scan</button>
+          <button id="spectrum-stop" type="button">Stop</button>
+        </div>
+      </div>
+      <form id="spectrum-config" class="inline-form">
+        <label>Start MHz <input id="spec-start" type="number" step="0.1" value="140" /></label>
+        <label>End MHz <input id="spec-end" type="number" step="0.1" value="170" /></label>
+        <label>Threshold dB <input id="spec-thresh" type="number" step="1" value="-45" /></label>
+        <button type="submit">Apply range</button>
+      </form>
+      <p id="spectrum-meta" class="meta">Idle</p>
+      <canvas id="spectrum-canvas" width="1100" height="220"></canvas>
+      <h3 class="mini">Waterfall</h3>
+      <canvas id="waterfall-canvas" width="1100" height="180"></canvas>
+      <div class="split">
+        <div>
+          <h3 class="mini">Peaks</h3>
+          <ul id="peak-list" class="event-list">
+            <li class="empty">Start a scan to see peaks.</li>
+          </ul>
+        </div>
+        <div>
+          <h3 class="mini">Worker</h3>
+          <pre id="spectrum-status" class="code-out">{{ spectrum | tojson(indent=2) }}</pre>
+        </div>
+      </div>
+    </section>
+
+    
+    <section class="panel wide">
+      <div class="panel-head">
+        <h2>Decode worker</h2>
+        <div class="btn-row">
+          <button id="decode-start" type="button">Start decode</button>
+          <button id="decode-stop" type="button">Stop</button>
+        </div>
+      </div>
+      <form id="decode-form" class="inline-form">
+        <label>MHz <input id="dec-freq" type="number" step="0.0001" value="929.662" required /></label>
+        <label>Mode
+          <select id="dec-mode">
+            <option value="auto">auto</option>
+            <option value="pocsag" selected>pocsag</option>
+            <option value="flex">flex</option>
+            <option value="dmr">dmr</option>
+            <option value="p25">p25</option>
+          </select>
+        </label>
+        <button type="submit">Enqueue</button>
+      </form>
+      <p id="decode-meta" class="meta">Idle</p>
+      <div class="split">
+        <div>
+          <h3 class="mini">Recent decodes</h3>
+          <ul id="decode-list" class="event-list">
+            <li class="empty">Start decode worker and enqueue a job (or scan paging band).</li>
+          </ul>
+        </div>
+        <div>
+          <h3 class="mini">Worker JSON</h3>
+          <pre id="decode-status" class="code-out">{{ decode | tojson(indent=2) }}</pre>
+        </div>
+      </div>
+    </section>
+    <section class="panel wide">
+      <div class="panel-head">
+        <h2>SDR load balance</h2>
+        <button id="balance-apply" type="button">Auto-assign sticks</button>
+      </div>
+      <p class="hint">One radio scans. A different radio parks on decode. WiFi/BT stay on the Pi, not on the SDR.</p>
+      <div class="split">
+        <article class="card" id="slot-scan">
+          <h3>Scan stick</h3>
+          <p class="meta" id="slot-scan-meta">Unassigned</p>
+        </article>
+        <article class="card" id="slot-decode">
+          <h3>Decode stick</h3>
+          <p class="meta" id="slot-decode-meta">Unassigned</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>SDR devices</h2>
+        <button id="refresh-devices" type="button">Refresh</button>
+      </div>
+      <div id="device-list" class="cards">
+        {% if devices %}
+          {% for d in devices %}
+          <article class="card" data-id="{{ d.id }}">
+            <h3>{{ d.name }}</h3>
+            <p class="meta">{{ d.type }} · {{ d.status }}</p>
+            <p class="meta">id: {{ d.id }}{% if d.serial %} · SN: {{ d.serial }}{% endif %}</p>
+            <p>{{ d.detail }}</p>
+            <label class="role-row">
+              Role
+              <select class="role-select" data-device="{{ d.id }}">
+                {% for r in roles %}
+                <option value="{{ r }}" {% if r == d.role %}selected{% endif %}>{{ r }}</option>
+                {% endfor %}
+              </select>
+            </label>
+          </article>
+          {% endfor %}
+        {% else %}
+          <p class="empty">No SDR detected.</p>
+        {% endif %}
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>Local tools</h2>
+      </div>
+      <ul class="tool-list" id="tool-list">
+        {% for name, present in tools.items() %}
+        <li class="{{ 'ok' if present else 'missing' }}">
+          <span>{{ name }}</span>
+          <span>{{ 'found' if present else 'missing' }}</span>
+        </li>
+        {% endfor %}
+      </ul>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>Classify frequency</h2>
+      </div>
+      <form id="classify-form" class="inline-form">
+        <input id="freq-input" type="number" step="0.001" min="0" placeholder="MHz e.g. 162.55" required />
+        <button type="submit">Classify</button>
+      </form>
+      <pre id="classify-out" class="code-out">Enter a frequency to match the starter band plan.</pre>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>Event feed</h2>
+        <button id="refresh-events" type="button">Refresh</button>
+      </div>
+      <ul id="event-list" class="event-list">
+        {% for e in events %}
+        <li>
+          <span class="ts">{{ e.ts }}</span>
+          <strong>{{ e.kind }}</strong>
+          <span>{{ e.summary }}</span>
+        </li>
+        {% else %}
+        <li class="empty">No events yet.</li>
+        {% endfor %}
+      </ul>
+    </section>
+
+    
+    <section class="panel wide">
+      <div class="panel-head">
+        <h2>WiFi / Bluetooth discovery</h2>
+        <div class="btn-row">
+          <button id="wireless-start" type="button">Start discovery</button>
+          <button id="wireless-stop" type="button">Stop</button>
+        </div>
+      </div>
+      <p id="wireless-meta" class="meta">Idle</p>
+      <div class="split">
+        <div>
+          <h3 class="mini">WiFi</h3>
+          <table>
+            <thead><tr><th>MAC</th><th>SSID / Name</th><th>RSSI</th><th>Ch</th><th>Vendor</th></tr></thead>
+            <tbody id="wifi-body">
+              {% for d in wifi_devices %}
+              <tr>
+                <td><code>{{ d.mac }}</code></td>
+                <td>{{ d.ssid or d.name }}{% if d.known_name %} <em>({{ d.known_name }})</em>{% endif %}</td>
+                <td>{{ d.rssi }}</td>
+                <td>{{ d.channel }}</td>
+                <td>{{ d.vendor }}</td>
+              </tr>
+              {% else %}
+              <tr><td colspan="5" class="empty">No WiFi devices yet — start discovery.</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        <div>
+          <h3 class="mini">Bluetooth</h3>
+          <table>
+            <thead><tr><th>MAC</th><th>Name</th><th>RSSI</th><th>Vendor</th></tr></thead>
+            <tbody id="bt-body">
+              {% for d in bt_devices %}
+              <tr>
+                <td><code>{{ d.mac }}</code></td>
+                <td>{{ d.name }}{% if d.known_name %} <em>({{ d.known_name }})</em>{% endif %}</td>
+                <td>{{ d.rssi }}</td>
+                <td>{{ d.vendor }}</td>
+              </tr>
+              {% else %}
+              <tr><td colspan="4" class="empty">No Bluetooth devices yet — start discovery.</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <pre id="wireless-status" class="code-out">{{ wireless | tojson(indent=2) }}</pre>
+    </section>
+    <section class="panel wide">
+      <div class="panel-head">
+        <h2>Band plan</h2>
+        <span class="hint">Starter hints for scanners / classify</span>
+      </div>
+      <table>
+        <thead>
+          <tr><th>Name</th><th>MHz</th><th>Mode hint</th><th>Notes</th></tr>
+        </thead>
+        <tbody>
+          {% for b in bands %}
+          <tr>
+            <td>{{ b.name }}</td>
+            <td>{{ b.start_mhz }} – {{ b.end_mhz }}</td>
+            <td><code>{{ b.mode_hint }}</code></td>
+            <td>{{ b.notes }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </section>
+
+    <section class="panel wide">
+      <div class="panel-head">
+        <h2>Known MAC catalog</h2>
+        <span class="hint">Local list only — not a global MAC dump</span>
+      </div>
+      <form id="known-mac-form" class="inline-form">
+        <input id="km-mac" placeholder="AA:BB:CC:DD:EE:FF" required />
+        <input id="km-name" placeholder="Name" required />
+        <select id="km-type">
+          <option value="bluetooth">bluetooth</option>
+          <option value="wifi">wifi</option>
+          <option value="unknown">unknown</option>
+        </select>
+        <input id="km-notes" placeholder="Notes" />
+        <button type="submit">Save known</button>
+      </form>
+      <table>
+        <thead>
+          <tr><th>MAC</th><th>Name</th><th>Type</th><th>Notes</th></tr>
+        </thead>
+        <tbody id="mac-body">
+          {% for d in known_macs.get('devices', []) %}
+          <tr>
+            <td><code>{{ d.mac }}</code></td>
+            <td>{{ d.name }}</td>
+            <td>{{ d.type }}</td>
+            <td>{{ d.notes }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </section>
+  </main>
+
+  <script src="/static/js/app.js"></script>
+</body>
+</html>

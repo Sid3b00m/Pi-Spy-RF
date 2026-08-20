@@ -1,0 +1,17 @@
+{
+  "note": "Local known WiFi/Bluetooth MACs for identification. Not a global database.",
+  "devices": [
+    {
+      "mac": "AA:BB:CC:DD:EE:FF",
+      "name": "Example phone",
+      "type": "bluetooth",
+      "notes": "Replace with your devices"
+    },
+    {
+      "mac": "B8:27:EB:DE:AD:01",
+      "name": "My Lab Pi",
+      "type": "wifi",
+      "notes": "phase4 test"
+    }
+  ]
+}
