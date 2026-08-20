@@ -11,7 +11,7 @@ Web-based multi-SDR RF suite for **Raspberry Pi** — spectrum scanning, digital
 | Guide | Description |
 |-------|-------------|
 | **[Install Guide (INSTALL.md)](INSTALL.md)** | Full step-by-step Pi setup, troubleshooting, DSD, auth |
-| **[docs/installation.md](docs/installation.md)** | Install guide in repo docs folder |
+| **[Online docs](https://sid3b00m.github.io/Pi-Spy-RF/)** | Install guide on GitHub Pages |
 | **[ROADMAP.md](ROADMAP.md)** | Planned features |
 
 ---
