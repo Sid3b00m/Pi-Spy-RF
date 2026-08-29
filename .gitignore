@@ -6,4 +6,3 @@ config/config.yaml
 data/*.db
 *.log
 .DS_Store
-app/data/*.db
