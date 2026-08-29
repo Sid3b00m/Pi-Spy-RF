@@ -7,7 +7,6 @@ target the importing module rather than app.core.config.
 """
 from __future__ import annotations
 
-import importlib
 import sys
 from pathlib import Path
 
