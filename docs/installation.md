@@ -8,7 +8,7 @@ Step-by-step setup for **Raspberry Pi 3 / 4 / 5** running Raspberry Pi OS (Bookw
 
 Estimated time: **15–30 minutes** (plus optional DSD build time).
 
-> **Not only for Pi:** the same app runs on **Linux, macOS, and Windows** (demo mode without SDR). See [docs/platforms.md](docs/platforms.md) and [SECURITY.md](SECURITY.md).
+> **Not only for Pi:** the same app runs on **Linux (all major distros), macOS, and Windows** — in demo mode without SDR hardware. See [Install on any platform](platforms.md) and [Security hardening](security.md).
 
 ---
 
@@ -219,17 +219,28 @@ Monitor mode for deeper packet capture requires a compatible USB adapter and man
 
 ---
 
-## Windows development (no SDR)
+## Other platforms
 
-For UI/API development on Windows without hardware:
+This guide targets the Pi. The same codebase runs everywhere else — see **[Install on any platform](platforms.md)** for full instructions covering macOS (Apple Silicon and Intel), native Windows, WSL2, and every major Linux distribution, plus auto-start setup and per-platform troubleshooting.
+
+Quick starts:
+
+```bash
+# macOS / any Linux — app only, no system packages
+chmod +x run.sh && ./run.sh
+```
 
 ```bat
-git clone https://github.com/Sid3b00m/Pi-Spy-RF.git
-cd Pi-Spy-RF
+:: Windows
 run.bat
 ```
 
-Demo SDR devices and simulated spectrum/decode data are used when no sticks are found.
+```bash
+# Linux with SDR tools + auto-start (detects apt/dnf/pacman/zypper/apk)
+sudo ./install.sh
+```
+
+Demo SDR devices and simulated spectrum/decode data are used whenever no real sticks are found, so the dashboard is fully explorable without hardware.
 
 ---
 
@@ -287,4 +298,5 @@ sudo rm -f /etc/modprobe.d/rtl-sdr-blacklist.conf
 ## Support
 
 - GitHub: https://github.com/Sid3b00m/Pi-Spy-RF
-- Roadmap: [ROADMAP.md](ROADMAP.md)
+- Roadmap: [ROADMAP.md](../ROADMAP.md)
+- Other platforms: [Install on any platform](platforms.md)

@@ -13,18 +13,21 @@ git clone https://github.com/Sid3b00m/Pi-Spy-RF.git
 cd Pi-Spy-RF
 ```
 
-| OS | Command |
-|----|---------|
-| **Raspberry Pi / Linux** | `chmod +x install.sh run.sh && sudo ./install.sh` |
-| **macOS** | `chmod +x run.sh && ./run.sh` |
-| **Windows** | `run.bat` |
+| OS | Command | Notes |
+|----|---------|-------|
+| **Raspberry Pi** | `chmod +x install.sh run.sh && sudo ./install.sh` | Installs SDR tools + systemd service |
+| **Linux** (Debian, Ubuntu, Fedora, RHEL, Arch, openSUSE, Alpine) | `chmod +x install.sh run.sh && sudo ./install.sh` | Auto-detects your package manager |
+| **macOS** (Apple Silicon or Intel) | `chmod +x run.sh && ./run.sh` | Add SDR tools with `brew install rtl-sdr hackrf sox` |
+| **Windows** | `run.bat` | RTL-SDR needs the Zadig WinUSB driver |
 
 Dashboard: **http://127.0.0.1:8080** (or `http://<host-ip>:8080` if LAN-bound with auth).
 
+No SDR hardware? Everything still runs in **demo mode** with simulated data, on every platform.
+
 ## Guides
 
-- [Platforms — Mac / Windows / Linux / Pi](platforms.md)
-- [Installation (Pi detailed)](installation.md)
+- [**Install on any platform**](platforms.md) — Pi, macOS, Windows, and every Linux variant, with auto-start and per-platform troubleshooting
+- [Installation (Raspberry Pi, detailed)](installation.md)
 - [Security hardening](security.md)
 - [GitHub repository](https://github.com/Sid3b00m/Pi-Spy-RF)
 

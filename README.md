@@ -10,57 +10,75 @@ Web-based multi-SDR RF suite for **Raspberry Pi** — spectrum scanning, digital
 
 | Guide | Description |
 |-------|-------------|
+| **[Install on any platform](docs/platforms.md)** | Pi, macOS, Windows, WSL2, and every Linux distro — plus auto-start and troubleshooting |
 | **[Install Guide (INSTALL.md)](INSTALL.md)** | Full step-by-step Pi setup, troubleshooting, DSD, auth |
 | **[Online docs](https://sid3b00m.github.io/Pi-Spy-RF/)** | Install guide on GitHub Pages |
-| **[Platforms (Mac/Win/Linux)](docs/platforms.md)** | How to run on every OS |
 | **[SECURITY.md](SECURITY.md)** | Hardening notes and LAN advice |
 | **[ROADMAP.md](ROADMAP.md)** | Planned features |
 
 ---
 
-## Quick install (Raspberry Pi)
+## Install
 
-Copy and paste on a fresh **Raspberry Pi OS** system:
+Requires **Python 3.11+**. No SDR hardware? Every platform still runs in **demo mode** with simulated data.
+
+```bash
+git clone https://github.com/Sid3b00m/Pi-Spy-RF.git
+cd Pi-Spy-RF
+```
+
+### Raspberry Pi
 
 ```bash
 sudo apt update && sudo apt install -y git
-git clone https://github.com/Sid3b00m/Pi-Spy-RF.git
-cd Pi-Spy-RF
 chmod +x install.sh run.sh
 sudo ./install.sh
 ```
 
-Open the dashboard from any device on your network:
+Installs rtl-sdr, multimon-ng, Python dependencies, config, and a **systemd service** so it starts on boot. Open `http://<your-pi-ip>:8080` from any device on your network (`hostname -I` shows the address).
 
-```text
-http://<your-pi-ip>:8080
+Supported: Pi 5, Pi 4, Pi 400, Pi 3/3B+, Pi Zero 2 W. Works on Pi OS 64-bit, 32-bit, and Lite.
+
+### Linux (any distro)
+
+```bash
+chmod +x install.sh run.sh
+sudo ./install.sh
 ```
 
-Find your Pi IP: `hostname -I`
+The installer detects **apt, dnf, yum, pacman, zypper, and apk**, so Debian, Ubuntu, Mint, Pop!\_OS, Kali, Fedora, RHEL, Rocky, Alma, Arch, Manjaro, openSUSE and Alpine are all handled. It warns about anything unavailable instead of failing, and skips systemd where there isn't any.
 
-The installer sets up rtl-sdr, multimon-ng, Python dependencies, config, and a **systemd service** so Pi-Spy-RF starts on boot.
+App only, no system packages or root:
 
-**Need more detail?** See [INSTALL.md](INSTALL.md) or [docs/installation.md](docs/installation.md).
-
----
-
-## Quick start (Windows dev)
-
-```bat
-git clone https://github.com/Sid3b00m/Pi-Spy-RF.git
-cd Pi-Spy-RF
-run.bat
+```bash
+./run.sh
 ```
 
-Open http://127.0.0.1:8080 — demo mode runs without SDR hardware.
-
-### macOS / Linux (no systemd)
+### macOS (Apple Silicon or Intel)
 
 ```bash
 chmod +x run.sh && ./run.sh
 ```
 
-Full matrix and package notes: [docs/platforms.md](docs/platforms.md). Security: [SECURITY.md](SECURITY.md).
+Add SDR support with Homebrew:
+
+```bash
+brew install rtl-sdr hackrf sox multimon-ng
+```
+
+### Windows
+
+```bat
+run.bat
+```
+
+Opens on http://127.0.0.1:8080. For a real RTL-SDR, install the WinUSB driver with [Zadig](https://zadig.akeo.ie/) and put the `rtl-sdr` binaries on `PATH`. WSL2 also works, with [usbipd-win](https://github.com/dorssel/usbipd-win) for USB passthrough.
+
+---
+
+**Full instructions for every platform**, including per-distro package lists, auto-start (systemd / launchd / Task Scheduler), and troubleshooting: **[docs/platforms.md](docs/platforms.md)**
+
+Detailed Pi walkthrough: [INSTALL.md](INSTALL.md) · Hardening: [SECURITY.md](SECURITY.md)
 
 ---
 
