@@ -70,7 +70,7 @@ sudo ./install.sh
 
 Then open `http://<pi-ip>:8080` from any device on your LAN (`hostname -I` shows the address).
 
-For the full walkthrough with hardware notes and DSD build steps, see **[INSTALL.md](../INSTALL.md)** / **[installation.md](installation.md)**.
+For the full walkthrough with hardware notes and DSD build steps, see the **[Install Guide](installation.md)**.
 
 ### Supported Pi models
 
