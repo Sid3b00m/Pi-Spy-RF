@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 import uvicorn
@@ -9,6 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.base import BaseHTTPMiddleware
 
+from app import __version__
 from app.api.routes import router as api_router
 from app.core.security import SECURITY_HEADERS
 from app.core.auth import (
@@ -32,7 +34,17 @@ from app.core.wireless import init_wireless_tables, list_wireless, wireless_work
 
 APP_DIR = Path(__file__).resolve().parent
 
-app = FastAPI(title="Pi-Spy-RF", version="0.8.1")
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    (ROOT / "data").mkdir(parents=True, exist_ok=True)
+    init_db()
+    init_wireless_tables()
+    ensure_mini_oui()
+    yield
+
+
+app = FastAPI(title="Pi-Spy-RF", version=__version__, lifespan=lifespan)
 app.include_router(api_router)
 app.mount("/static", StaticFiles(directory=APP_DIR / "static"), name="static")
 templates = Jinja2Templates(directory=str(APP_DIR / "templates"))
@@ -64,14 +76,6 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 
 
 app.add_middleware(SecurityHeadersMiddleware)
-
-
-@app.on_event("startup")
-def on_startup() -> None:
-    (ROOT / "data").mkdir(parents=True, exist_ok=True)
-    init_db()
-    init_wireless_tables()
-    ensure_mini_oui()
 
 
 @app.get("/login", response_class=HTMLResponse)

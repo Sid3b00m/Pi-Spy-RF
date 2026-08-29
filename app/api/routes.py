@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
+from app import __version__
 from app.core.bandplan import classify_mhz, list_bands
 from app.core.balance import assignments, assign_exclusive, auto_balance
 from app.core.db import add_event, list_events
@@ -73,7 +74,7 @@ class KnownMac(BaseModel):
 
 @router.get("/health")
 def health():
-    return {"ok": True, "service": "pi-spy-rf", "version": "0.8.1"}
+    return {"ok": True, "service": "pi-spy-rf", "version": __version__}
 
 
 @router.get("/host")
