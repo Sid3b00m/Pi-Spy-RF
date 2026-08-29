@@ -5,15 +5,14 @@ import hmac
 import os
 import secrets
 from datetime import datetime, timedelta, timezone
-
-from fastapi import Request
-from fastapi.responses import RedirectResponse
+from threading import Lock
 
 from app.core.config import get_config
 from app.core.security import login_limiter
 
 COOKIE = "pi_spy_session"
 _sessions: dict[str, datetime] = {}
+_sessions_lock = Lock()
 SESSION_HOURS = 12
 
 
@@ -50,27 +49,39 @@ def verify_login(username: str, password: str, *, client_key: str | None = None)
     return user_ok and pass_ok
 
 
+def _prune_sessions_locked(now: datetime) -> None:
+    for token in [t for t, exp in _sessions.items() if exp < now]:
+        _sessions.pop(token, None)
+
+
 def create_session() -> str:
     token = secrets.token_urlsafe(32)
-    _sessions[token] = datetime.now(timezone.utc) + timedelta(hours=SESSION_HOURS)
+    now = datetime.now(timezone.utc)
+    with _sessions_lock:
+        # Expired tokens are otherwise only dropped when re-presented, so a
+        # long-lived receiver would accumulate them forever.
+        _prune_sessions_locked(now)
+        _sessions[token] = now + timedelta(hours=SESSION_HOURS)
     return token
 
 
 def session_valid(token: str | None) -> bool:
     if not token:
         return False
-    exp = _sessions.get(token)
-    if not exp:
-        return False
-    if exp < datetime.now(timezone.utc):
-        _sessions.pop(token, None)
-        return False
+    with _sessions_lock:
+        exp = _sessions.get(token)
+        if not exp:
+            return False
+        if exp < datetime.now(timezone.utc):
+            _sessions.pop(token, None)
+            return False
     return True
 
 
 def drop_session(token: str | None) -> None:
     if token:
-        _sessions.pop(token, None)
+        with _sessions_lock:
+            _sessions.pop(token, None)
 
 
 def public_path(path: str) -> bool:

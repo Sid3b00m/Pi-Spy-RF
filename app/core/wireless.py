@@ -1,19 +1,16 @@
 from __future__ import annotations
 
-import json
 import random
 import re
 import shutil
 import subprocess
 import threading
-import time
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
-from app.core.config import ROOT, get_config
+from app.core.config import get_config
 from app.core.db import add_event, get_db
-from app.core.devices import list_radio_devices
 from app.core.mac_db import lookup_oui, load_known_macs
 from app.core.security import clamp_interval_s, validate_iface
 
@@ -98,6 +95,18 @@ def upsert_device(dev: WirelessDevice) -> None:
         )
 
 
+def count_wireless(kind: str | None = None) -> int:
+    """Row count only. Status polling must not drag whole rows out of SQLite."""
+    with get_db() as conn:
+        if kind:
+            row = conn.execute(
+                "SELECT COUNT(*) AS n FROM wireless_devices WHERE kind=?", (kind,)
+            ).fetchone()
+        else:
+            row = conn.execute("SELECT COUNT(*) AS n FROM wireless_devices").fetchone()
+    return int(row["n"]) if row else 0
+
+
 def list_wireless(kind: str | None = None, limit: int = 100) -> list[dict[str, Any]]:
     limit = max(1, min(limit, 500))
     with get_db() as conn:
@@ -149,10 +158,14 @@ class WirelessWorker:
         self._last_scan: dict[str, Any] = {}
 
     def status(self) -> dict[str, Any]:
+        # Counted before taking the lock so DB latency never blocks the scan loop.
+        counts = {"wifi": count_wireless("wifi"), "bluetooth": count_wireless("bluetooth")}
         with self._lock:
-            return self._status_unlocked()
+            return self._status_unlocked(counts)
 
-    def _status_unlocked(self) -> dict[str, Any]:
+    def _status_unlocked(self, counts: dict[str, int] | None = None) -> dict[str, Any]:
+        if counts is None:
+            counts = {"wifi": count_wireless("wifi"), "bluetooth": count_wireless("bluetooth")}
         return {
             "running": self._running,
             "interval_s": self._interval_s,
@@ -161,10 +174,7 @@ class WirelessWorker:
             "error": self._error,
             "last_scan": self._last_scan,
             "demo": bool((self._last_scan or {}).get("demo")),
-            "counts": {
-                "wifi": len(list_wireless("wifi", 500)),
-                "bluetooth": len(list_wireless("bluetooth", 500)),
-            },
+            "counts": counts,
         }
 
     def configure(
@@ -221,11 +231,8 @@ class WirelessWorker:
                 if self._bt_enabled:
                     bt_n = self._scan_bluetooth()
                 with self._lock:
-                    demo = (not shutil.which("nmcli") and not shutil.which("iw")) or (
-                        not shutil.which("bluetoothctl") and self._bt_enabled
-                    )
-                    # More accurate: demo if both counts came from demo helpers is hard;
-                    # flag when Linux wireless tools are missing.
+                    # Counts alone cannot tell real captures from demo samples, so
+                    # flag demo when no Linux wireless tool is present at all.
                     tools_missing = not (shutil.which("nmcli") or shutil.which("iw") or shutil.which("bluetoothctl"))
                     self._last_scan = {
                         "ts": datetime.now(timezone.utc).isoformat(),

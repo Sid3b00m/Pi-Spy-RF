@@ -3,11 +3,67 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
+from threading import Lock
 from typing import Any
 
 from app.core.config import ROOT, get_config
 
 _MAC_RE = re.compile(r"^([0-9A-Fa-f]{2}([-:])){5}[0-9A-Fa-f]{2}$")
+
+# Wireless enrichment hits both tables once per device per scan cycle, and the
+# OUI table is meant to be swapped for the full Wireshark manuf list (~50k
+# lines), so both are cached and revalidated against the file's mtime/size.
+_cache_lock = Lock()
+_oui_cache: dict[str, Any] = {"stamp": None, "table": {}}
+_known_cache: dict[str, Any] = {"stamp": None, "data": None}
+
+
+def _stamp(path: Path) -> tuple[int, int] | None:
+    try:
+        st = path.stat()
+    except OSError:
+        return None
+    return (st.st_mtime_ns, st.st_size)
+
+
+def _parse_oui_line(line: str) -> tuple[str, str] | None:
+    line = line.strip()
+    if not line or line.startswith("#"):
+        return None
+    parts = line.split()
+    if not parts:
+        return None
+    # Wireshark manuf prefixes may carry a bit-mask suffix, e.g. B8:27:EB/28.
+    oui = parts[0].split("/", 1)[0].upper().replace("-", ":")
+    if len(oui) < 8:
+        return None
+    vendor = " ".join(parts[1:]) if len(parts) > 1 else oui
+    return oui[:8], vendor
+
+
+def _oui_table(path: Path) -> dict[str, str]:
+    stamp = _stamp(path)
+    if stamp is None:
+        return {}
+    with _cache_lock:
+        if _oui_cache["stamp"] == stamp:
+            return _oui_cache["table"]
+    table: dict[str, str] = {}
+    with path.open(encoding="utf-8", errors="ignore") as f:
+        for line in f:
+            parsed = _parse_oui_line(line)
+            if parsed:
+                table.setdefault(parsed[0], parsed[1])
+    with _cache_lock:
+        _oui_cache["stamp"] = stamp
+        _oui_cache["table"] = table
+    return table
+
+
+def _invalidate_known_cache() -> None:
+    with _cache_lock:
+        _known_cache["stamp"] = None
+        _known_cache["data"] = None
 
 
 def _known_path() -> Path:
@@ -40,8 +96,16 @@ def _known_path() -> Path:
 
 def load_known_macs() -> dict[str, Any]:
     path = _known_path()
+    stamp = _stamp(path)
+    with _cache_lock:
+        if stamp is not None and _known_cache["stamp"] == stamp:
+            return _known_cache["data"]
     with path.open(encoding="utf-8") as f:
-        return json.load(f)
+        data = json.load(f)
+    with _cache_lock:
+        _known_cache["stamp"] = stamp
+        _known_cache["data"] = data
+    return data
 
 
 def save_known_macs(data: dict[str, Any]) -> dict[str, Any]:
@@ -68,11 +132,18 @@ def save_known_macs(data: dict[str, Any]) -> dict[str, Any]:
         "devices": cleaned,
     }
     path.write_text(json.dumps(out, indent=2), encoding="utf-8")
+    _invalidate_known_cache()
     return out
 
 
+def _load_known_uncached() -> dict[str, Any]:
+    """Editors must not mutate the shared cached document in place."""
+    with _known_path().open(encoding="utf-8") as f:
+        return json.load(f)
+
+
 def upsert_known_mac(mac: str, name: str, type_: str = "unknown", notes: str = "") -> dict[str, Any]:
-    data = load_known_macs()
+    data = _load_known_uncached()
     mac_n = mac.strip().upper().replace("-", ":")
     if not _MAC_RE.match(mac_n):
         raise ValueError(f"invalid mac: {mac}")
@@ -93,7 +164,7 @@ def upsert_known_mac(mac: str, name: str, type_: str = "unknown", notes: str = "
 
 
 def delete_known_mac(mac: str) -> dict[str, Any]:
-    data = load_known_macs()
+    data = _load_known_uncached()
     mac_n = mac.strip().upper().replace("-", ":")
     data["devices"] = [
         d
@@ -113,19 +184,7 @@ def lookup_oui(mac: str) -> str | None:
     if not path.exists():
         return None
     clean = mac.upper().replace("-", ":")
-    prefix = clean[:8]
-    with path.open(encoding="utf-8", errors="ignore") as f:
-        for line in f:
-            line = line.strip()
-            if not line or line.startswith("#"):
-                continue
-            parts = line.split()
-            if not parts:
-                continue
-            oui = parts[0].upper().replace("-", ":")
-            if len(oui) >= 8 and (oui.startswith(prefix) or prefix.startswith(oui[:8])):
-                return " ".join(parts[1:]) if len(parts) > 1 else oui
-    return None
+    return _oui_table(path).get(clean[:8])
 
 
 def ensure_mini_oui() -> Path:

@@ -12,9 +12,8 @@ from typing import Any
 from app.core.bandplan import classify_mhz
 from app.core.db import add_event
 from app.core.balance import require_role
-from app.core.devices import list_radio_devices
 from app.core.decode import decode_worker
-from app.core.security import clamp_freq_mhz, clamp_interval_s, clamp_spectrum_range, validate_device_id
+from app.core.security import clamp_interval_s, clamp_spectrum_range, validate_device_id
 
 
 @dataclass
