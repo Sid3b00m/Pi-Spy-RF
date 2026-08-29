@@ -2,8 +2,15 @@
 # Pi-Spy-RF installer.
 #
 # Supports Raspberry Pi OS, Debian, Ubuntu, Mint, Fedora, RHEL/Rocky/Alma,
-# Arch, openSUSE and Alpine. On an unrecognised system it still sets up the
-# Python app and tells you which system packages to install by hand.
+# Arch, openSUSE, Alpine, Void and Gentoo, with systemd or OpenRC auto-start.
+# On an unrecognised system it still sets up the Python app and tells you which
+# system packages to install by hand.
+#
+# Useful overrides:
+#   INSTALL_RF_TOOLS=0   skip system packages, set up the Python app only
+#   ENABLE_SERVICE=0     do not install an auto-start service
+#   SERVICE_USER=name    run the service as this user (default: the sudo caller)
+#   SDR_GROUP=name       group granted USB access (default: plugdev)
 set -euo pipefail
 
 INSTALL_DIR="${INSTALL_DIR:-$(cd "$(dirname "$0")" && pwd)}"
@@ -23,7 +30,7 @@ cd "$INSTALL_DIR"
 
 detect_pm() {
   local pm
-  for pm in apt-get dnf yum pacman zypper apk; do
+  for pm in apt-get dnf yum pacman zypper apk xbps-install emerge; do
     if command -v "$pm" >/dev/null 2>&1; then
       echo "$pm"
       return 0
@@ -46,6 +53,8 @@ install_optional() {
       pacman)  pacman -S --noconfirm --needed "$p" >/dev/null 2>&1 || warn "optional package unavailable: $p (try the AUR)" ;;
       zypper)  zypper --non-interactive install "$p" >/dev/null 2>&1 || warn "optional package unavailable: $p" ;;
       apk)     apk add --no-cache "$p" >/dev/null 2>&1 || warn "optional package unavailable: $p" ;;
+      xbps-install) xbps-install -y "$p" >/dev/null 2>&1 || warn "optional package unavailable: $p" ;;
+      emerge)  emerge --quiet --noreplace "$p" >/dev/null 2>&1 || warn "optional package unavailable: $p" ;;
     esac
   done
 }
@@ -83,10 +92,27 @@ install_system_packages() {
     apk)
       log "Detected apk (Alpine). Installing packages..."
       apk add --no-cache python3 py3-pip git sox bluez iw libusb
+      # musl builds of uvicorn[standard]'s extras are not always published as
+      # wheels, so pip has to compile them and needs a toolchain present.
+      install_optional build-base python3-dev linux-headers libffi-dev
       install_optional rtl-sdr hackrf networkmanager multimon-ng
       ;;
+    xbps-install)
+      log "Detected xbps (Void). Installing packages..."
+      xbps-install -Sy python3 python3-pip git sox bluez iw NetworkManager libusb
+      install_optional rtl-sdr hackrf multimon-ng
+      ;;
+    emerge)
+      log "Detected emerge (Gentoo). Installing packages..."
+      warn "Gentoo builds from source - this step can take a long time."
+      emerge --quiet --noreplace \
+        dev-lang/python dev-vcs/git media-sound/sox net-wireless/bluez net-wireless/iw
+      install_optional net-wireless/rtl-sdr net-wireless/hackrf-tools \
+        net-wireless/multimon-ng net-misc/networkmanager
+      ;;
     none)
-      warn "No supported package manager found (apt/dnf/yum/pacman/zypper/apk)."
+      warn "No supported package manager found."
+      warn "Tried: apt-get, dnf, yum, pacman, zypper, apk, xbps-install, emerge."
       warn "Install these yourself, then re-run: python3 + venv, rtl-sdr, hackrf,"
       warn "multimon-ng, sox, bluez, iw, NetworkManager, libusb."
       ;;
@@ -148,31 +174,94 @@ fi
 
 chmod +x "$INSTALL_DIR/run.sh" "$INSTALL_DIR/install.sh"
 
-# Reading the SDR over USB normally needs group membership rather than root.
-if [[ $EUID -eq 0 ]] && getent group plugdev >/dev/null 2>&1; then
-  usermod -aG plugdev "$SERVICE_USER" 2>/dev/null || true
+# Reading the SDR over USB needs group membership rather than root. Only Debian
+# ships a plugdev group and matching rtl-sdr udev rules; elsewhere the group is
+# absent and the packaged rules rely on uaccess, which covers an interactive
+# login but not the system user a service runs as. So create the group, install
+# our own rules, and join the group regardless of distro.
+SDR_GROUP="${SDR_GROUP:-plugdev}"
+
+group_exists() {
+  getent group "$1" >/dev/null 2>&1 || grep -q "^$1:" /etc/group 2>/dev/null
+}
+
+setup_usb_access() {
+  if ! group_exists "$SDR_GROUP"; then
+    log "Creating the $SDR_GROUP group for SDR access..."
+    groupadd -f "$SDR_GROUP" 2>/dev/null ||
+      addgroup "$SDR_GROUP" 2>/dev/null ||
+      warn "could not create the $SDR_GROUP group"
+  fi
+
+  if group_exists "$SDR_GROUP"; then
+    usermod -aG "$SDR_GROUP" "$SERVICE_USER" 2>/dev/null ||
+      addgroup "$SERVICE_USER" "$SDR_GROUP" 2>/dev/null ||
+      warn "could not add $SERVICE_USER to $SDR_GROUP; SDR access may need root"
+  fi
+
+  local rules_src="$INSTALL_DIR/scripts/60-pi-spy-rf-sdr.rules"
+  if [[ -d /etc/udev/rules.d && -f "$rules_src" ]]; then
+    log "Installing SDR udev rules..."
+    sed "s|GROUP=\"plugdev\"|GROUP=\"$SDR_GROUP\"|g" \
+      "$rules_src" > /etc/udev/rules.d/60-pi-spy-rf-sdr.rules
+    udevadm control --reload-rules >/dev/null 2>&1 || true
+    udevadm trigger >/dev/null 2>&1 || true
+  fi
+
+  log "Group changes apply at next login; replug the dongle to pick up the rules."
+}
+
+if [[ $EUID -eq 0 ]]; then
+  setup_usb_access
 fi
 
 # --------------------------------------------------------------------------
-# Auto-start (systemd only)
+# Auto-start (systemd or OpenRC)
 # --------------------------------------------------------------------------
+
+install_systemd_service() {
+  log "Installing systemd service..."
+  sed "s|User=pi|User=$SERVICE_USER|g; s|/home/pi/Pi-Spy-RF|$INSTALL_DIR|g" \
+    "$INSTALL_DIR/scripts/pi-spy-rf.service" > /etc/systemd/system/pi-spy-rf.service
+  systemctl daemon-reload
+  systemctl enable pi-spy-rf.service
+  systemctl restart pi-spy-rf.service || true
+  log "Check status: sudo systemctl status pi-spy-rf"
+}
+
+install_openrc_service() {
+  local src="$INSTALL_DIR/scripts/pi-spy-rf.openrc"
+  if [[ ! -f "$src" ]]; then
+    warn "scripts/pi-spy-rf.openrc missing; skipping the auto-start service."
+    return 0
+  fi
+  log "Installing OpenRC service..."
+  sed "s|pi:pi|$SERVICE_USER:$SERVICE_USER|g; s|/home/pi/Pi-Spy-RF|$INSTALL_DIR|g" \
+    "$src" > /etc/init.d/pi-spy-rf
+  chmod +x /etc/init.d/pi-spy-rf
+  rc-update add pi-spy-rf default >/dev/null 2>&1 || warn "could not enable the service at boot"
+  rc-service pi-spy-rf restart >/dev/null 2>&1 || true
+  log "Check status: rc-service pi-spy-rf status"
+}
 
 if [[ "$ENABLE_SERVICE" == "1" && $EUID -eq 0 ]]; then
   if command -v systemctl >/dev/null 2>&1 && [[ -d /run/systemd/system ]]; then
-    log "Installing systemd service..."
-    sed "s|User=pi|User=$SERVICE_USER|g; s|/home/pi/Pi-Spy-RF|$INSTALL_DIR|g" \
-      "$INSTALL_DIR/scripts/pi-spy-rf.service" > /etc/systemd/system/pi-spy-rf.service
-    systemctl daemon-reload
-    systemctl enable pi-spy-rf.service
-    systemctl restart pi-spy-rf.service || true
-    log "Check status: sudo systemctl status pi-spy-rf"
+    install_systemd_service
+  elif command -v rc-update >/dev/null 2>&1; then
+    install_openrc_service
   else
-    warn "systemd not present; skipping the auto-start service."
-    warn "Start manually with ./run.sh, or use your init system (OpenRC, runit, launchd)."
+    warn "No systemd or OpenRC found; skipping the auto-start service."
+    warn "Start manually with ./run.sh, or wire it into your init system"
+    warn "(runit, s6, dinit) using scripts/pi-spy-rf.openrc as a reference."
   fi
 fi
 
+# busybox hostname (Alpine, Void's minimal images) has no -I.
 IP=$(hostname -I 2>/dev/null | awk '{print $1}' || true)
+if [[ -z "$IP" ]] && command -v ip >/dev/null 2>&1; then
+  IP=$(ip -4 route get 1.1.1.1 2>/dev/null |
+    awk '{for (i = 1; i < NF; i++) if ($i == "src") print $(i + 1)}' || true)
+fi
 log "Done."
 log "Default bind is 127.0.0.1 (see config). Local: http://127.0.0.1:8080"
 log "For LAN access: set server.host=0.0.0.0, enable auth, then open http://${IP:-<host-ip>}:8080"

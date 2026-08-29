@@ -1,0 +1,23 @@
+# Pi-Spy-RF: allow non-root access to SDR hardware.
+#
+# Distros disagree here. Debian ships rtl-sdr udev rules keyed to the plugdev
+# group; Fedora, Arch and openSUSE have no plugdev group and rely on uaccess,
+# which only covers an interactively logged-in seat - not the system user a
+# systemd service runs as. These rules cover both cases.
+#
+# install.sh copies this to /etc/udev/rules.d/ and substitutes the group.
+# By hand: edit GROUP below, copy it there, then
+#   sudo udevadm control --reload-rules && sudo udevadm trigger
+
+# Realtek RTL2832U - the common RTL-SDR dongles
+SUBSYSTEM=="usb", ATTRS{idVendor}=="0bda", ATTRS{idProduct}=="2832", MODE="0660", GROUP="plugdev", TAG+="uaccess"
+SUBSYSTEM=="usb", ATTRS{idVendor}=="0bda", ATTRS{idProduct}=="2838", MODE="0660", GROUP="plugdev", TAG+="uaccess"
+SUBSYSTEM=="usb", ATTRS{idVendor}=="0bda", ATTRS{idProduct}=="2831", MODE="0660", GROUP="plugdev", TAG+="uaccess"
+
+# Great Scott Gadgets HackRF One (and DFU/bootloader modes)
+SUBSYSTEM=="usb", ATTRS{idVendor}=="1d50", ATTRS{idProduct}=="6089", MODE="0660", GROUP="plugdev", TAG+="uaccess"
+SUBSYSTEM=="usb", ATTRS{idVendor}=="1d50", ATTRS{idProduct}=="cc15", MODE="0660", GROUP="plugdev", TAG+="uaccess"
+SUBSYSTEM=="usb", ATTRS{idVendor}=="1fc9", ATTRS{idProduct}=="000c", MODE="0660", GROUP="plugdev", TAG+="uaccess"
+
+# Airspy R2 / Mini
+SUBSYSTEM=="usb", ATTRS{idVendor}=="1d50", ATTRS{idProduct}=="60a1", MODE="0660", GROUP="plugdev", TAG+="uaccess"

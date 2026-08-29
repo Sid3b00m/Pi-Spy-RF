@@ -1,0 +1,28 @@
+#!/sbin/openrc-run
+# Pi-Spy-RF service for OpenRC systems (Alpine, Gentoo, Devuan, Artix).
+# install.sh rewrites the user and paths below; edit them if installing by hand.
+
+name="pi-spy-rf"
+description="Pi-Spy-RF web SDR suite"
+
+command="/home/pi/Pi-Spy-RF/.venv/bin/python"
+command_args="-m app.main"
+command_user="pi:pi"
+command_background=true
+directory="/home/pi/Pi-Spy-RF"
+pidfile="/run/${RC_SVCNAME}.pid"
+output_log="/var/log/${RC_SVCNAME}.log"
+error_log="/var/log/${RC_SVCNAME}.log"
+
+# Set PI_SPY_PASSWORD here, or better, in a root-only file sourced at boot.
+# export PI_SPY_PASSWORD="..."
+
+depend() {
+	need net
+	after firewall
+}
+
+start_pre() {
+	checkpath --directory --owner "$command_user" --mode 0755 "$directory/data"
+	checkpath --file --owner "$command_user" --mode 0644 "$output_log"
+}
