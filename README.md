@@ -46,7 +46,14 @@ chmod +x install.sh run.sh
 sudo ./install.sh
 ```
 
-The installer detects **apt, dnf, yum, pacman, zypper, and apk**, so Debian, Ubuntu, Mint, Pop!\_OS, Kali, Fedora, RHEL, Rocky, Alma, Arch, Manjaro, openSUSE and Alpine are all handled. It warns about anything unavailable instead of failing, and skips systemd where there isn't any.
+The installer detects **apt, dnf, yum, pacman, zypper, apk, xbps, and emerge**, covering Debian, Ubuntu, Mint, Pop!\_OS, Kali, Fedora, RHEL, Rocky, Alma, Arch, Manjaro, openSUSE, Alpine, Void and Gentoo. It also:
+
+- installs **systemd or OpenRC** auto-start, whichever the system uses
+- installs **udev rules** and creates the SDR group, so non-root USB access works on distros that have no `plugdev`
+- adds a **build toolchain on musl** systems where Python wheels must be compiled
+- **warns instead of failing** when an optional package is missing from your repos
+
+On an unrecognised distro it still sets up the Python app and prints the packages to install by hand.
 
 App only, no system packages or root:
 

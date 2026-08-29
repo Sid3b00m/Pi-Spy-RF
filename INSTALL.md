@@ -217,7 +217,7 @@ Monitor mode for deeper packet capture requires a compatible USB adapter and man
 
 ## Other platforms
 
-This guide targets the Pi. The same codebase runs everywhere else — see **[Install on any platform](docs/platforms.md)** for full instructions covering macOS (Apple Silicon and Intel), native Windows, WSL2, and every major Linux distribution, plus auto-start setup and per-platform troubleshooting.
+This guide targets the Pi, and the `apt` commands above are specific to Debian-based systems (including Raspberry Pi OS). The same codebase runs everywhere else — see **[Install on any platform](docs/platforms.md)** for per-distro package lists, macOS (Apple Silicon and Intel), native Windows, WSL2, auto-start setup, and per-platform troubleshooting.
 
 Quick starts:
 
@@ -232,9 +232,13 @@ run.bat
 ```
 
 ```bash
-# Linux with SDR tools + auto-start (detects apt/dnf/pacman/zypper/apk)
+# Linux with SDR tools + auto-start
+# detects apt, dnf, yum, pacman, zypper, apk, xbps, emerge
+# and installs a systemd or OpenRC service to match the system
 sudo ./install.sh
 ```
+
+**On a non-Debian distro**, skip steps 2 and 4 above — `install.sh` installs the right packages for your system — and note that only Debian has a `plugdev` group. Step 5's driver blacklist and the udev rules apply everywhere; the installer handles both. See [USB permissions](docs/platforms.md#usb-permissions-all-linux) if the dongle needs root.
 
 Demo SDR devices and simulated spectrum/decode data are used whenever no real sticks are found, so the dashboard is fully explorable without hardware.
 

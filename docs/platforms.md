@@ -212,12 +212,23 @@ Set `server.host: "0.0.0.0"` and `auth.enabled: true` in `config/config.yaml`. T
 
 ## Linux
 
-`install.sh` detects apt, dnf, yum, pacman, zypper, and apk, installs what it can, warns about anything unavailable, and skips the systemd step on systems without it:
+One command covers every supported distribution:
 
 ```bash
 chmod +x install.sh run.sh
 sudo ./install.sh
 ```
+
+`install.sh` detects **apt, dnf, yum, pacman, zypper, apk, xbps, and emerge**, installs what it can, and warns about anything your repositories lack rather than aborting. It also picks **systemd or OpenRC** for auto-start, installs udev rules so the SDR works without root, and adds a compiler toolchain on musl systems where wheels must be built locally.
+
+Useful overrides:
+
+| Variable | Effect |
+|----------|--------|
+| `INSTALL_RF_TOOLS=0` | Skip system packages; set up the Python app only |
+| `ENABLE_SERVICE=0` | Do not install an auto-start service |
+| `SERVICE_USER=name` | Run the service as this user (default: the `sudo` caller) |
+| `SDR_GROUP=name` | Group granted USB access (default: `plugdev`) |
 
 Prefer to do it yourself, or on a distro not listed? The per-distro commands below install the same things. Everything except Python is optional — missing tools only reduce the app to demo mode for that feature.
 
@@ -293,9 +304,28 @@ doas apk add python3 py3-pip git rtl-sdr sox bluez iw networkmanager libusb
 
 Alpine is musl-based, so some RF tools are unpackaged; `multimon-ng` and `dsd-fme` usually need building. There is no systemd — use OpenRC or run `./run.sh` under a supervisor.
 
+### Void
+
+```bash
+sudo xbps-install -Sy python3 python3-pip git \
+  rtl-sdr hackrf sox bluez iw NetworkManager libusb
+```
+
+Void uses runit rather than systemd, so `install.sh` skips the auto-start service. Use `scripts/pi-spy-rf.openrc` as a reference for a runit service directory, or run `./run.sh` under a supervisor.
+
+### Gentoo
+
+```bash
+sudo emerge --ask dev-lang/python dev-vcs/git media-sound/sox \
+  net-wireless/bluez net-wireless/iw net-wireless/rtl-sdr \
+  net-wireless/hackrf-tools net-wireless/multimon-ng
+```
+
+Everything is compiled from source, so expect this to take a while. Gentoo can run either systemd or OpenRC; `install.sh` detects which and installs the matching service.
+
 ### Other distributions
 
-Void, Gentoo, Slackware, NixOS and friends aren't auto-detected, but nothing here is distro-specific. Install the equivalents of: **Python 3.11+ with venv, rtl-sdr, hackrf, multimon-ng, sox, bluez, iw, NetworkManager, libusb**, then run `./run.sh`. Search your package manager for the names, for example:
+Slackware, NixOS and friends aren't auto-detected, but nothing here is distro-specific. Install the equivalents of: **Python 3.11+ with venv, rtl-sdr, hackrf, multimon-ng, sox, bluez, iw, NetworkManager, libusb**, then run `./run.sh`. Search your package manager for the names, for example:
 
 ```bash
 apt-cache search rtl-sdr        # Debian family
@@ -305,7 +335,10 @@ zypper se rtl-sdr              # openSUSE
 apk search rtl-sdr             # Alpine
 xbps-query -Rs rtl-sdr         # Void
 emerge --search rtl-sdr        # Gentoo
+nix search nixpkgs rtl-sdr     # NixOS
 ```
+
+On NixOS, prefer a declarative `environment.systemPackages` entry over running the installer, and use `nix-shell -p python311` for the virtualenv.
 
 ### RTL-SDR driver conflict (all Linux)
 
@@ -320,12 +353,32 @@ Unplug and replug the dongle, then confirm with `rtl_test -t`.
 
 ### USB permissions (all Linux)
 
-Reading an SDR as a normal user needs group membership rather than root:
+Reading an SDR as a normal user needs group membership rather than root. `install.sh` handles this; the manual steps differ by distro because **only Debian and its derivatives ship a `plugdev` group**.
+
+On Debian, Ubuntu, Mint, Kali, and Raspberry Pi OS:
 
 ```bash
 sudo usermod -aG plugdev $USER
 # log out and back in
 ```
+
+On Fedora, RHEL, Arch, openSUSE, Void, and Gentoo there is no `plugdev` group. Their `rtl-sdr` packages rely on udev's `uaccess` tag, which grants access to an interactively logged-in user but **not** to the system user a service runs as. Create the group and install the rules shipped with the repo:
+
+```bash
+sudo groupadd -f plugdev
+sudo usermod -aG plugdev $USER
+sudo cp scripts/60-pi-spy-rf-sdr.rules /etc/udev/rules.d/
+sudo udevadm control --reload-rules && sudo udevadm trigger
+# log out and back in, then replug the dongle
+```
+
+To use a different group, set `SDR_GROUP` when running the installer:
+
+```bash
+sudo SDR_GROUP=sdr ./install.sh
+```
+
+Confirm access without root using `rtl_test -t` as your normal user. `usb_claim_interface error -6` means the rules or group membership have not taken effect yet — see the troubleshooting section below.
 
 ---
 
@@ -344,6 +397,25 @@ sudo systemctl status pi-spy-rf
 ```
 
 Logs: `journalctl -u pi-spy-rf -f`
+
+If the service starts but cannot reach the SDR while running `./run.sh` by hand works, the cause is almost always udev rules or group membership — see [USB permissions](#usb-permissions-all-linux). On Fedora and RHEL, SELinux can also block a service started from a home directory; `sudo ausearch -m avc -ts recent` will show it, and installing under `/opt` avoids it.
+
+### Linux without systemd (OpenRC)
+
+Alpine, Gentoo's default profile, Devuan, and Artix use OpenRC. `install.sh` detects this and installs `scripts/pi-spy-rf.openrc` for you. Manually:
+
+```bash
+sudo cp scripts/pi-spy-rf.openrc /etc/init.d/pi-spy-rf
+sudo nano /etc/init.d/pi-spy-rf        # fix command_user and the paths
+sudo chmod +x /etc/init.d/pi-spy-rf
+sudo rc-update add pi-spy-rf default
+sudo rc-service pi-spy-rf start
+sudo rc-service pi-spy-rf status
+```
+
+Logs go to `/var/log/pi-spy-rf.log`.
+
+For runit (Void) or s6, create the equivalent service directory pointing at `.venv/bin/python -m app.main` with the working directory set to the checkout.
 
 ### macOS (launchd)
 

@@ -24,6 +24,12 @@ chmod +x install.sh run.sh
 sudo ./install.sh
 ```
 
+> **On another Linux distribution?** Only the first line above is Debian-specific —
+> install `git` with your own package manager, then run `install.sh` unchanged. It
+> detects apt, dnf, yum, pacman, zypper, apk, xbps, and emerge, and installs a
+> systemd or OpenRC service to match your system. See
+> [Install on any platform](platforms.md) for per-distro package lists.
+
 When finished, open in any browser on your network:
 
 ```text
@@ -32,8 +38,9 @@ http://<pi-ip-address>:8080
 
 Find your Pi IP with `hostname -I`.
 
-The installer handles system RF packages, the RTL-SDR driver conflict, the Python
-environment, and the optional `pi-spy-rf` systemd service.
+The installer handles system RF packages, the RTL-SDR driver conflict, USB
+permissions and udev rules, the Python environment, and the optional
+`pi-spy-rf` auto-start service.
 
 ---
 
