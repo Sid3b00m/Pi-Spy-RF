@@ -139,11 +139,17 @@ fi
 # Python application
 # --------------------------------------------------------------------------
 
+# Dropping privileges via sudo assumes root is itself listed in sudoers. Debian,
+# Fedora and Arch all grant that; Alpine does not, so as root sudo answers
+# "root is not in the sudoers file" and the venv is never created. runuser and
+# su ask the kernel directly and need no sudo policy at all.
 run_as_user() {
-  if [[ $EUID -eq 0 ]]; then
-    sudo -u "$SERVICE_USER" "$@"
-  else
+  if [[ $EUID -ne 0 ]]; then
     "$@"
+  elif command -v runuser >/dev/null 2>&1; then
+    runuser -u "$SERVICE_USER" -- "$@"
+  else
+    su -s /bin/sh "$SERVICE_USER" -c "$(printf '%q ' "$@")"
   fi
 }
 
@@ -159,6 +165,27 @@ if [[ ! -d "$INSTALL_DIR/.venv" ]]; then
 fi
 run_as_user "$INSTALL_DIR/.venv/bin/pip" install -q --upgrade pip
 run_as_user "$INSTALL_DIR/.venv/bin/pip" install -q -r "$INSTALL_DIR/requirements.txt"
+
+# Under SELinux everything below /home is labelled user_home_t, which systemd is
+# not permitted to execute, so the unit dies with 203/EXEC ("Permission denied")
+# and retries forever without the app ever starting. Relabelling the interpreter
+# as bin_t is what makes ExecStart work from a home directory.
+if [[ $EUID -eq 0 ]] && command -v selinuxenabled >/dev/null 2>&1 && selinuxenabled; then
+  log "SELinux is enabled; labelling the virtualenv so systemd can execute it..."
+  venv_labelled=0
+  if command -v semanage >/dev/null 2>&1 && command -v restorecon >/dev/null 2>&1; then
+    # Preferred: a file context rule survives a full filesystem relabel.
+    if semanage fcontext -a -t bin_t "$INSTALL_DIR/.venv/bin(/.*)?" 2>/dev/null &&
+      restorecon -R "$INSTALL_DIR/.venv/bin" 2>/dev/null; then
+      venv_labelled=1
+    fi
+  fi
+  if [[ "$venv_labelled" -eq 0 ]]; then
+    # Fallback: applies immediately but is lost on a relabel.
+    chcon -R -t bin_t "$INSTALL_DIR/.venv/bin" 2>/dev/null ||
+      warn "could not relabel $INSTALL_DIR/.venv/bin - the service may fail with 203/EXEC"
+  fi
+fi
 
 if [[ ! -f "$INSTALL_DIR/config/config.yaml" ]]; then
   cp "$INSTALL_DIR/config/config.example.yaml" "$INSTALL_DIR/config/config.yaml"
