@@ -33,3 +33,15 @@ mac_db:
 decode:
   enabled: true
   auto_from_spectrum: true
+
+websdr:
+  # Public receiver picker. Set enabled: false to keep the dashboard fully offline
+  # (the panel then hides itself and no outbound request is ever made).
+  enabled: true
+  # The merged list is cached here, so a receiver with no internet still shows the
+  # last known directory instead of an empty dropdown.
+  cache_path: "data/websdr_receivers.json"
+  refresh_minutes: 60
+  stale_days: 30
+  timeout_s: 12
+  max_receivers: 4000

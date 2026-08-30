@@ -231,6 +231,34 @@
       </div>
       <pre id="wireless-status" class="code-out">{{ wireless | tojson(indent=2) }}</pre>
     </section>
+    <section class="panel wide" id="websdr-panel">
+      <div class="panel-head">
+        <h2>Public WebSDR receivers</h2>
+        <div class="btn-row">
+          <button id="websdr-refresh" type="button">Refresh list</button>
+        </div>
+      </div>
+      <p class="hint">
+        Borrow someone else's antenna — handy for checking whether a signal is local or
+        propagating. The receiver opens in a new tab. Directory from
+        <a href="https://www.receiverbook.de/" target="_blank" rel="noopener noreferrer">Receiverbook</a>
+        and the <a href="http://rx.linkfanel.net/" target="_blank" rel="noopener noreferrer">KiwiSDR
+        mirror</a>, the same two sources the God's Ear console uses.
+      </p>
+      <form id="websdr-form" class="inline-form">
+        <label>Type
+          <select id="websdr-type"><option value="">All types</option></select>
+        </label>
+        <label>Search <input id="websdr-search" type="search" placeholder="Town, country or callsign" /></label>
+        <label>Receiver
+          <select id="websdr-select"><option value="">Loading…</option></select>
+        </label>
+        <button type="submit">Open receiver</button>
+      </form>
+      <p id="websdr-meta" class="meta">Loading directory…</p>
+      <div id="websdr-detail" class="card websdr-detail empty">Pick a receiver to see its details.</div>
+    </section>
+
     <section class="panel wide">
       <div class="panel-head">
         <h2>Band plan</h2>

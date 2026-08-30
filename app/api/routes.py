@@ -17,6 +17,12 @@ from app.core.mac_db import (
     upsert_known_mac,
 )
 from app.core.spectrum import spectrum_worker
+from app.core.websdr import (
+    WebSdrUnavailable,
+    get_catalog as websdr_catalog,
+    is_enabled as websdr_enabled,
+    list_receivers as websdr_list,
+)
 from app.core.wireless import list_wireless, wireless_worker
 
 router = APIRouter(prefix="/api")
@@ -252,6 +258,45 @@ def wireless_devices(kind: str | None = None, limit: int = 100):
     if kind and kind not in ("wifi", "bluetooth"):
         raise HTTPException(400, "kind must be wifi or bluetooth")
     return {"devices": list_wireless(kind, limit)}
+
+
+@router.get("/websdr/receivers")
+def websdr_receivers(kind: str | None = None, q: str | None = None, limit: int = 1000):
+    """Public receiver directory for the picker. Served from cache between refreshes."""
+    if not websdr_enabled():
+        raise HTTPException(404, "websdr is disabled in config")
+    limit = max(1, min(limit, 2000))
+    kind = (kind or "").strip()[:32] or None
+    query = (q or "").strip()[:64] or None
+    try:
+        return websdr_list(kind=kind, query=query, limit=limit)
+    except WebSdrUnavailable as exc:
+        raise HTTPException(503, str(exc)) from exc
+
+
+@router.post("/websdr/refresh")
+def websdr_refresh():
+    if not websdr_enabled():
+        raise HTTPException(404, "websdr is disabled in config")
+    try:
+        catalog = websdr_catalog(force=True)
+    except WebSdrUnavailable as exc:
+        raise HTTPException(503, str(exc)) from exc
+    add_event(
+        "websdr_refresh",
+        f"WebSDR directory refreshed: {catalog['count']} receivers",
+        meta={"sources": catalog["sources"], "errors": catalog["errors"]},
+    )
+    return {
+        "ok": True,
+        "count": catalog["count"],
+        "by_type": catalog["by_type"],
+        "sources": catalog["sources"],
+        "errors": catalog["errors"],
+        "updated_at": catalog["updated_at"],
+        "stale": catalog["stale"],
+        "degraded_reason": catalog["degraded_reason"],
+    }
 
 
 @router.get("/events")

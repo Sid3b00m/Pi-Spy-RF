@@ -24,6 +24,20 @@ This app runs local subprocesses (`rtl_power`, `rtl_fm`, `multimon-ng`, `nmcli`,
 
 ---
 
+## Outbound requests
+
+One feature reaches the internet: the **Public WebSDR receivers** panel fetches two
+receiver directories (`rx.linkfanel.net`, `www.receiverbook.de`). Both URLs are
+compile-time constants — nothing a dashboard user types is ever fetched, so the panel is
+not an SSRF surface. Receiver URLs coming back from those directories are accepted only
+when they parse as `http`/`https`, and the browser refuses any other scheme before
+opening a tab. Directory text is treated as untrusted input and HTML-escaped in the UI.
+
+Set `websdr.enabled: false` in `config/config.yaml` for a host that must make no
+outbound requests at all; the panel then hides itself and no fetch is attempted.
+
+---
+
 ## Hardening changes (0.8.0 / 0.8.1)
 
 1. **Default bind** in `config.example.yaml` is `127.0.0.1` (local only). Open LAN only when you enable auth.
@@ -36,6 +50,7 @@ This app runs local subprocesses (`rtl_power`, `rtl_fm`, `multimon-ng`, `nmcli`,
 8. **YAML** loaded with `yaml.safe_load` only.
 9. **SQLite** uses parameterized queries.
 10. **UI** escapes dynamic HTML (`escapeHtml` in `app.js`).
+11. **Third-party receiver URLs** are scheme-checked server-side and again in the browser before a tab is opened.
 
 ---
 

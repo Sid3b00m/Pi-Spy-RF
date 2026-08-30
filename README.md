@@ -96,6 +96,7 @@ Detailed Pi walkthrough: [INSTALL.md](INSTALL.md) · Hardening: [SECURITY.md](SE
 - **Digital decode** — POCSAG, FLEX, DMR, P25, NXDN, and more
 - **Load balancing** — auto-assign sticks (RTL scan, HackRF decode)
 - **Wireless catalog** — WiFi + Bluetooth observation, OUI lookup, known MAC tagging
+- **Public WebSDR picker** — pick from ~1900 KiwiSDR / OpenWebRX / WebSDR receivers worldwide
 - **Optional LAN auth** — password gate for shared networks
 
 ---
@@ -134,7 +135,7 @@ journalctl -u pi-spy-rf -f
 Pi-Spy-RF/
   app/              FastAPI backend + dashboard UI
   config/           config.example.yaml -> config.yaml
-  data/             SQLite DB, OUI seed, known MACs
+  data/             SQLite DB, OUI seed, known MACs, WebSDR directory cache
   docs/             GitHub Pages documentation
   install.sh        One-shot Pi installer
   INSTALL.md        Detailed install guide
@@ -153,8 +154,43 @@ Pi-Spy-RF/
 | `POST /api/spectrum/start` | Start spectrum worker |
 | `POST /api/decode/start` | Start decode worker |
 | `GET /api/decode/modes` | Supported digital modes |
+| `GET /api/websdr/receivers` | Public receiver directory (`kind`, `q`, `limit`) |
+| `POST /api/websdr/refresh` | Re-fetch the receiver directory |
 
 Interactive docs: `http://<host>:8080/docs`
+
+---
+
+## Public WebSDR picker
+
+The **Public WebSDR receivers** panel lets you pick a receiver from a dropdown and open
+it in a new tab — useful for checking whether a signal you are seeing locally is also
+audible somewhere far away.
+
+The list is merged from two directories, the same pair the
+[God's Ear](https://github.com/Sid3b00m/gods-ear) console uses:
+
+| Source | Contributes |
+|--------|-------------|
+| [Receiverbook](https://www.receiverbook.de/) | KiwiSDR, OpenWebRX and WebSDR sites whose operators registered them |
+| [KiwiSDR mirror](http://rx.linkfanel.net/) | Live user counts, SNR and antenna details for KiwiSDRs |
+
+Both are fetched by the server, not the browser: neither sends CORS headers, and the
+mirror is plain HTTP. The merged result is cached under `data/websdr_receivers.json`, so
+an offline or firewalled receiver still shows the last known list (marked as cached).
+
+The WebSDR.org list is deliberately not fetched, because its terms forbid automated
+re-use. WebSDR sites still appear here via Receiverbook, where operators opted in.
+
+Tune it in `config/config.yaml`:
+
+```yaml
+websdr:
+  enabled: true              # false hides the panel and makes no outbound request
+  refresh_minutes: 60
+  stale_days: 30             # how long a cached list may still be served
+  timeout_s: 12
+```
 
 ---
 

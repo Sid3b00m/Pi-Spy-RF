@@ -227,3 +227,14 @@ label { color: var(--muted); font-size: 0.85rem; display: inline-flex; gap: 0.35
 }
 .login-card label { display: grid; gap: 0.3rem; }
 .login-card input { width: 100%; }
+
+/* Receiver names come from the directories and run long, so cap the select. */
+#websdr-select { max-width: min(34rem, 100%); }
+#websdr-panel .hint a { color: var(--accent); }
+.websdr-detail { display: grid; gap: 0.1rem; }
+.websdr-detail .meta span {
+  display: inline-block;
+  min-width: 6rem;
+  color: var(--ink);
+}
+.websdr-url { margin: 0 0 0.5rem; word-break: break-all; }

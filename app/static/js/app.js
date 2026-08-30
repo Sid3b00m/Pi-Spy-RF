@@ -473,6 +473,182 @@ document.getElementById("balance-apply")?.addEventListener("click", async () => 
 refreshBalance().catch(console.error);
 
 
+let websdrReceivers = [];
+let websdrStatus = null;
+
+/** Third-party directory data, so never trust the scheme it hands us. */
+function isHttpUrl(value) {
+  return /^https?:\/\//i.test(String(value || ""));
+}
+
+function websdrAge(seconds) {
+  if (!Number.isFinite(seconds)) return "";
+  const mins = Math.round(seconds / 60);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins} min ago`;
+  const hours = Math.round(mins / 60);
+  if (hours < 48) return `${hours} h ago`;
+  return `${Math.round(hours / 24)} days ago`;
+}
+
+function websdrLabel(r) {
+  const bits = [r.label || r.name || r.id];
+  if (r.type) bits.push(r.type);
+  if (r.users_max) bits.push(`${r.users || 0}/${r.users_max} users`);
+  else if (r.bands) bits.push(r.bands);
+  return bits.join(" · ");
+}
+
+function fillWebsdrTypes(byType) {
+  const sel = document.getElementById("websdr-type");
+  if (!sel) return;
+  const current = sel.value;
+  const total = Object.values(byType || {}).reduce((a, b) => a + b, 0);
+  sel.innerHTML =
+    `<option value="">All types (${total})</option>` +
+    Object.entries(byType || {})
+      .map(
+        ([kind, n]) =>
+          `<option value="${escapeHtml(kind)}">${escapeHtml(kind)} (${n})</option>`
+      )
+      .join("");
+  if ([...sel.options].some((o) => o.value === current)) sel.value = current;
+}
+
+function renderWebsdrDetail() {
+  const box = document.getElementById("websdr-detail");
+  const sel = document.getElementById("websdr-select");
+  if (!box || !sel) return;
+  const r = websdrReceivers.find((x) => x.id === sel.value);
+  if (!r) {
+    box.className = "card websdr-detail empty";
+    box.textContent = "Pick a receiver to see its details.";
+    return;
+  }
+  const rows = [
+    ["Site", r.label],
+    ["Listing", r.name !== r.label ? r.name : null],
+    ["Type", r.version ? `${r.type} ${r.version}` : r.type],
+    ["Coverage", r.bands],
+    ["Users", r.users_max ? `${r.users || 0} of ${r.users_max}` : null],
+    ["SNR", r.snr],
+    ["Antenna", r.antenna],
+    ["Grid", r.grid],
+    ["Position", `${r.lat.toFixed(3)}, ${r.lon.toFixed(3)}`],
+    ["Listed by", r.source],
+  ].filter(([, v]) => v);
+  box.className = "card websdr-detail";
+  box.innerHTML =
+    `<p class="websdr-url"><code>${escapeHtml(r.url)}</code></p>` +
+    rows
+      .map(
+        ([k, v]) =>
+          `<p class="meta"><span>${escapeHtml(k)}</span>${escapeHtml(v)}</p>`
+      )
+      .join("");
+}
+
+function renderWebsdrOptions() {
+  const sel = document.getElementById("websdr-select");
+  const meta = document.getElementById("websdr-meta");
+  if (!sel) return;
+  const kind = document.getElementById("websdr-type")?.value || "";
+  const needle = (document.getElementById("websdr-search")?.value || "")
+    .trim()
+    .toLowerCase();
+  const rows = websdrReceivers.filter((r) => {
+    if (kind && r.type !== kind) return false;
+    if (needle) {
+      const hay = `${r.label || ""} ${r.name || ""}`.toLowerCase();
+      if (!hay.includes(needle)) return false;
+    }
+    return true;
+  });
+
+  const current = sel.value;
+  sel.innerHTML = rows.length
+    ? rows
+        .map(
+          (r) =>
+            `<option value="${escapeHtml(r.id)}">${escapeHtml(websdrLabel(r))}</option>`
+        )
+        .join("")
+    : '<option value="">No receiver matches that filter</option>';
+  if (rows.some((r) => r.id === current)) sel.value = current;
+
+  if (meta && websdrStatus) {
+    const parts = [`${rows.length} of ${websdrStatus.total} receivers`];
+    const byType = Object.entries(websdrStatus.by_type || {})
+      .map(([k, n]) => `${k} ${n}`)
+      .join(", ");
+    if (byType) parts.push(byType);
+    parts.push(`updated ${websdrAge(websdrStatus.age_s)}`);
+    if (websdrStatus.stale) {
+      parts.push(`cached copy — ${websdrStatus.degraded_reason || "directory unreachable"}`);
+    }
+    const failed = Object.entries(websdrStatus.errors || {})
+      .map(([k, v]) => `${k}: ${v}`)
+      .join("; ");
+    if (failed) parts.push(failed);
+    meta.textContent = parts.join(" · ");
+  }
+  renderWebsdrDetail();
+}
+
+async function refreshWebsdr() {
+  const panel = document.getElementById("websdr-panel");
+  if (!panel) return;
+  const meta = document.getElementById("websdr-meta");
+  try {
+    const res = await apiFetch("/api/websdr/receivers?limit=2000");
+    if (res.status === 404) {
+      panel.remove();
+      return;
+    }
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.detail || `HTTP ${res.status}`);
+    }
+    const data = await res.json();
+    websdrReceivers = data.receivers || [];
+    websdrStatus = data;
+    fillWebsdrTypes(data.by_type);
+    renderWebsdrOptions();
+  } catch (e) {
+    if (meta) meta.textContent = `Directory unavailable — ${e.message}`;
+  }
+}
+
+document.getElementById("websdr-type")?.addEventListener("change", renderWebsdrOptions);
+document.getElementById("websdr-search")?.addEventListener("input", renderWebsdrOptions);
+document.getElementById("websdr-select")?.addEventListener("change", renderWebsdrDetail);
+
+document.getElementById("websdr-form")?.addEventListener("submit", (ev) => {
+  ev.preventDefault();
+  const sel = document.getElementById("websdr-select");
+  const r = websdrReceivers.find((x) => x.id === sel?.value);
+  if (!r || !isHttpUrl(r.url)) return;
+  window.open(r.url, "_blank", "noopener,noreferrer");
+});
+
+document.getElementById("websdr-refresh")?.addEventListener("click", async () => {
+  const meta = document.getElementById("websdr-meta");
+  if (meta) meta.textContent = "Refreshing directory…";
+  try {
+    const res = await apiFetch("/api/websdr/refresh", { method: "POST" });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.detail || `HTTP ${res.status}`);
+    }
+  } catch (e) {
+    if (meta) meta.textContent = `Refresh failed — ${e.message}`;
+  }
+  await refreshWebsdr();
+  await refreshEvents();
+});
+
+refreshWebsdr().catch(console.error);
+
 async function fillDecodeModes() {
   const sel = document.getElementById("dec-mode");
   if (!sel) return;

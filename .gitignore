@@ -4,5 +4,7 @@ __pycache__/
 .pytest_cache/
 config/config.yaml
 data/*.db
+# Fetched from the public receiver directories at runtime, not ours to redistribute.
+data/websdr_receivers.json
 *.log
 .DS_Store

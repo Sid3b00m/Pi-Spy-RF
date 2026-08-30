@@ -9,6 +9,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.middleware.gzip import GZipMiddleware
 
 from app import __version__
 from app.api.routes import router as api_router
@@ -76,6 +77,10 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 
 
 app.add_middleware(SecurityHeadersMiddleware)
+
+# The public receiver directory alone is ~700 kB of JSON, and the waterfall
+# payloads are not small either. Added last so it wraps everything.
+app.add_middleware(GZipMiddleware, minimum_size=1024)
 
 
 @app.get("/login", response_class=HTMLResponse)

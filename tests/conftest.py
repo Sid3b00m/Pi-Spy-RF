@@ -19,12 +19,17 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 def isolated_state(tmp_path, monkeypatch):
     from app.core import db as db_mod
     from app.core import mac_db as mac_mod
+    from app.core import websdr as websdr_mod
 
     data_dir = tmp_path / "data"
     data_dir.mkdir(parents=True, exist_ok=True)
 
     monkeypatch.setattr(db_mod, "db_path", lambda: data_dir / "test.db")
     monkeypatch.setattr(mac_mod, "ROOT", tmp_path)
+    # Redirect the receiver cache and drop the in-memory copy, so no test can
+    # inherit a catalog or reach the real directories.
+    monkeypatch.setattr(websdr_mod, "ROOT", tmp_path)
+    monkeypatch.setattr(websdr_mod, "_catalog", None)
 
     db_mod.init_db()
     from app.core.wireless import init_wireless_tables

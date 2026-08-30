@@ -36,3 +36,5 @@ No SDR hardware? Everything still runs in **demo mode** with simulated data, on 
 1. Confirm devices (or demo placeholders) in the dashboard
 2. Enable **auth** before binding to `0.0.0.0`
 3. Auto-assign SDR roles, then start Spectrum / Decode
+4. Compare against a distant receiver from the **Public WebSDR receivers** panel (set
+   `websdr.enabled: false` if the host must make no outbound requests)
