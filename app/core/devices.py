@@ -77,15 +77,23 @@ def _detect_hackrf() -> list[RadioDevice]:
     serial = None
     for line in text.splitlines():
         if "Board ID Number" in line or "Board ID:" in line:
-            board = line.split(":")[-1].strip()
+            raw = line.split(":", 1)[-1].strip()
+            # hackrf_info prints "2 (HackRF One)": the parenthesised half is the
+            # board name, so keeping the whole string renders it twice.
+            match = re.search(r"\(([^)]*)\)", raw)
+            board = (match.group(1).strip() if match else raw) or None
         if "Serial number" in line or "Serial Number" in line:
-            serial = line.split(":")[-1].strip()
+            serial = line.split(":", 1)[-1].strip()
     if board or serial or code == 0:
+        if board and "hackrf" in board.lower():
+            name = board
+        else:
+            name = f"HackRF One ({board or 'unknown board'})"
         devices.append(
             RadioDevice(
                 id="hackrf-0",
                 type="hackrf",
-                name=f"HackRF One ({board or 'unknown board'})",
+                name=name,
                 serial=serial,
                 status="online" if code == 0 else "detected",
                 role="decode",
