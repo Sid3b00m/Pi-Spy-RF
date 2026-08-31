@@ -16,6 +16,41 @@ from app.core.decode import decode_worker
 from app.core.security import clamp_interval_s, clamp_spectrum_range, validate_device_id
 
 
+def _is_hackrf(device: dict[str, Any]) -> bool:
+    """hackrf_info reports type 'hackrf'; via SoapySDR the driver name is the type."""
+    return "hackrf" in f"{device.get('type') or ''} {device.get('id') or ''}".lower()
+
+
+def parse_sweep_csv(
+    text: str, start_mhz: float, end_mhz: float
+) -> tuple[list[float], list[float]]:
+    """Parse hackrf_sweep CSV into (freqs_mhz, powers), trimmed and in order.
+
+    Rows are `date, time, hz_low, hz_high, bin_width, samples, dB...`. The sweep
+    tunes in 20 MHz steps, so it overshoots whatever range was asked for, and the
+    segments come back in tuning order rather than frequency order.
+    """
+    points: list[tuple[float, float]] = []
+    for line in text.splitlines():
+        parts = [x.strip() for x in line.split(",")]
+        if len(parts) < 7:
+            continue
+        try:
+            hz_low = float(parts[2])
+            bin_width = float(parts[4])
+            powers = [float(x) for x in parts[6:]]
+        except ValueError:
+            continue
+        if bin_width <= 0:
+            continue
+        for i, power in enumerate(powers):
+            mhz = (hz_low + bin_width * (i + 0.5)) / 1e6
+            if start_mhz <= mhz <= end_mhz:
+                points.append((mhz, power))
+    points.sort(key=lambda p: p[0])
+    return [p[0] for p in points], [p[1] for p in points]
+
+
 @dataclass
 class Peak:
     freq_mhz: float
@@ -209,9 +244,12 @@ class SpectrumWorker:
         if device.get("type") == "rtl-sdr" and shutil.which("rtl_power"):
             return self._rtl_power_snapshot(device_id, center, span)
 
+        if _is_hackrf(device) and shutil.which("hackrf_sweep"):
+            return self._hackrf_sweep_snapshot(device_id, center, span)
+
         snap = self._demo_snapshot(device_id, center, span)
         snap.source = "fallback-demo"
-        snap.note = "No rtl_power/hardware path available; using simulated spectrum"
+        snap.note = "No rtl_power/hackrf_sweep path available; using simulated spectrum"
         return snap
 
     def _demo_snapshot(self, device_id: str, center: float, span: float) -> SpectrumSnapshot:
@@ -282,6 +320,37 @@ class SpectrumWorker:
             peaks=peaks,
             source="rtl_power",
             note="Captured via rtl_power",
+        )
+
+    def _hackrf_sweep_snapshot(self, device_id: str, center: float, span: float) -> SpectrumSnapshot:
+        start = self._start_mhz
+        end = self._end_mhz
+        # hackrf_sweep takes whole MHz, and refuses a bin width outside this range.
+        bin_hz = int(max(2445, min(5_000_000, (self._step_mhz * 1e6) / 4)))
+        cmd = [
+            "hackrf_sweep",
+            "-f",
+            f"{int(start)}:{int(end) + 1}",
+            "-w",
+            str(bin_hz),
+            "-1",
+        ]
+        p = subprocess.run(cmd, capture_output=True, text=True, timeout=60, check=False)
+        freqs, bins = parse_sweep_csv(p.stdout, start, end)
+        if not freqs:
+            detail = p.stderr.strip().splitlines()
+            raise RuntimeError(detail[-1] if detail else "hackrf_sweep returned no bins")
+        peaks = self._find_peaks(freqs, bins)
+        return SpectrumSnapshot(
+            ts=datetime.now(timezone.utc).isoformat(),
+            device_id=device_id,
+            center_mhz=center,
+            span_mhz=span,
+            bins=bins,
+            freqs_mhz=freqs,
+            peaks=peaks,
+            source="hackrf_sweep",
+            note="Captured via hackrf_sweep",
         )
 
     def _find_peaks(self, freqs: list[float], bins: list[float]) -> list[Peak]:

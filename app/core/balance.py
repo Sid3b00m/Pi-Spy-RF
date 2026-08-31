@@ -5,13 +5,22 @@ from typing import Any
 from app.core.db import add_event, set_device_role
 from app.core.devices import list_radio_devices
 
-# One SDR owns wide scan; another owns parked decode. WiFi/BT are not SDR-exclusive.
-EXCLUSIVE_ROLES = ("scan", "decode")
+# One SDR owns wide scan, another parks on decode, a third carries live audio.
+# Each tunes somewhere different, so they cannot share a radio. WiFi/BT are not
+# SDR-exclusive and are left out.
+EXCLUSIVE_ROLES = ("scan", "decode", "audio")
 
 
 def assignments() -> dict[str, Any]:
     devices = list_radio_devices()
-    by_role: dict[str, list[dict[str, Any]]] = {"scan": [], "decode": [], "wifi": [], "bluetooth": [], "idle": []}
+    by_role: dict[str, list[dict[str, Any]]] = {
+        "scan": [],
+        "decode": [],
+        "audio": [],
+        "wifi": [],
+        "bluetooth": [],
+        "idle": [],
+    }
     for d in devices:
         role = d.get("role") or "idle"
         by_role.setdefault(role, []).append(d)
@@ -24,10 +33,11 @@ def assignments() -> dict[str, Any]:
         "devices": devices,
         "scan": by_role.get("scan") or [],
         "decode": by_role.get("decode") or [],
+        "audio": by_role.get("audio") or [],
         "idle": by_role.get("idle") or [],
         "ok": not conflicts,
         "conflicts": conflicts,
-        "hint": "Use one stick for scan and a different stick for decode.",
+        "hint": "Scan, decode and audio each need their own stick. WiFi/BT are not SDR roles.",
     }
 
 

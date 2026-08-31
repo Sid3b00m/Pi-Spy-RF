@@ -34,6 +34,19 @@ decode:
   enabled: true
   auto_from_spectrum: true
 
+audio:
+  # Live listening. Needs a radio set to role=audio, which is exclusive: one SDR
+  # cannot scan and demodulate at the same time.
+  enabled: true
+  # RTL dongles go through rtl_fm. A HackRF has no packaged rtl_fm equivalent, so
+  # its IQ is captured at sample_rate and demodulated in-process instead; audio
+  # then comes out at sample_rate / 40. HackRF will not sample below 2000000.
+  sample_rate: 2000000
+  # Output rate for the rtl_fm / rx_fm backends.
+  output_rate: 48000
+  # How many browsers may listen to the one radio at once.
+  max_listeners: 4
+
 websdr:
   # Public receiver picker. Set enabled: false to keep the dashboard fully offline
   # (the panel then hides itself and no outbound request is ever made).

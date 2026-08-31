@@ -1,6 +1,7 @@
 """Worker threads: lifecycle, restart safety, locking, and hardware fallbacks."""
 from __future__ import annotations
 
+import shutil
 import subprocess
 import threading
 import time
@@ -9,7 +10,7 @@ import pytest
 
 from app.core.balance import auto_balance
 from app.core.decode import decode_worker
-from app.core.spectrum import spectrum_worker
+from app.core.spectrum import _is_hackrf, parse_sweep_csv, spectrum_worker
 from app.core.wireless import WirelessDevice, list_wireless, upsert_device, wireless_worker
 
 
@@ -172,6 +173,152 @@ def test_spectrum_loop_records_error_without_dying(monkeypatch):
         assert "synthetic capture failure" in (spectrum_worker.status()["error"] or "")
     finally:
         spectrum_worker.stop()
+
+
+# --------------------------------------------------------------------------
+# hackrf_sweep
+# --------------------------------------------------------------------------
+
+
+# hackrf_sweep emits `date, time, hz_low, hz_high, bin_width, samples, dB...`,
+# one row per 5 MHz quarter-segment, in tuning order rather than frequency order.
+SWEEP_HIGH = "2024-01-01, 00:00:00, 165000000, 170000000, 1000000, 20, -60.0, -61.0"
+SWEEP_LOW = "2024-01-01, 00:00:00, 160000000, 165000000, 1000000, 20, -50.0, -30.0"
+
+
+def test_is_hackrf_matches_hackrf_info_and_soapy_naming():
+    assert _is_hackrf({"type": "hackrf", "id": "hackrf-0"}) is True
+    assert _is_hackrf({"type": "HackRF One", "id": "soapy-0"}) is True
+    assert _is_hackrf({"type": "soapy", "id": "soapy-hackrf-0"}) is True
+    assert _is_hackrf({"type": "rtl-sdr", "id": "rtl-0"}) is False
+    assert _is_hackrf({}) is False
+
+
+def test_parse_sweep_csv_sorts_segments_back_into_frequency_order():
+    freqs, bins = parse_sweep_csv(f"{SWEEP_HIGH}\n{SWEEP_LOW}\n", 160.0, 170.0)
+    assert freqs == [160.5, 161.5, 165.5, 166.5]
+    assert bins == [-50.0, -30.0, -60.0, -61.0]
+
+
+def test_parse_sweep_csv_trims_the_overshoot_either_side_of_the_range():
+    """The sweep tunes in whole steps, so it always returns more than was asked for."""
+    freqs, _ = parse_sweep_csv(f"{SWEEP_LOW}\n{SWEEP_HIGH}\n", 161.0, 166.0)
+    assert freqs == [161.5, 165.5]
+
+
+def test_parse_sweep_csv_skips_rows_it_cannot_use():
+    junk = "\n".join(
+        [
+            "",
+            "hackrf_sweep version 2024.02.1",
+            "2024-01-01, 00:00:00, 160000000",
+            "2024-01-01, 00:00:00, x, y, 1000000, 20, -50.0",
+            "2024-01-01, 00:00:00, 160000000, 165000000, 0, 20, -50.0",
+            SWEEP_LOW,
+        ]
+    )
+    freqs, bins = parse_sweep_csv(junk, 160.0, 170.0)
+    assert freqs == [160.5, 161.5]
+    assert bins == [-50.0, -30.0]
+
+
+def test_parse_sweep_csv_returns_nothing_when_the_range_misses():
+    assert parse_sweep_csv(SWEEP_LOW, 400.0, 410.0) == ([], [])
+
+
+def test_hackrf_sweep_snapshot_parses_and_labels_its_source(monkeypatch):
+    def fake_run(*a, **kw):
+        return subprocess.CompletedProcess(a[0], 0, f"{SWEEP_HIGH}\n{SWEEP_LOW}", "")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    spectrum_worker.configure(start_mhz=160, end_mhz=170, threshold_db=-45)
+    snap = spectrum_worker._hackrf_sweep_snapshot("hackrf-0", 165.0, 10.0)
+    assert snap.source == "hackrf_sweep"
+    assert snap.freqs_mhz == [160.5, 161.5, 165.5, 166.5]
+    assert snap.bins == [-50.0, -30.0, -60.0, -61.0]
+    assert any(abs(p.freq_mhz - 161.5) < 0.01 for p in snap.peaks)
+
+
+def test_hackrf_sweep_reports_the_last_stderr_line_when_it_fails(monkeypatch):
+    stderr = "call hackrf_sample_rate_set(20000000 Hz)\nhackrf_open() failed: not found (-5)"
+
+    def fake_run(*a, **kw):
+        return subprocess.CompletedProcess(a[0], 1, "", stderr)
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    with pytest.raises(RuntimeError, match=r"hackrf_open\(\) failed"):
+        spectrum_worker._hackrf_sweep_snapshot("hackrf-0", 165.0, 10.0)
+
+
+def test_hackrf_sweep_raises_a_readable_error_with_no_output_at_all(monkeypatch):
+    def fake_run(*a, **kw):
+        return subprocess.CompletedProcess(a[0], 0, "", "")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    with pytest.raises(RuntimeError, match="no bins"):
+        spectrum_worker._hackrf_sweep_snapshot("hackrf-0", 165.0, 10.0)
+
+
+def test_hackrf_sweep_command_is_one_shot_over_whole_mhz(monkeypatch):
+    seen = {}
+
+    def fake_run(cmd, *a, **kw):
+        seen["cmd"] = cmd
+        return subprocess.CompletedProcess(cmd, 0, SWEEP_LOW, "")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    spectrum_worker.configure(start_mhz=160.4, end_mhz=170.6, step_mhz=0.4)
+    spectrum_worker._hackrf_sweep_snapshot("hackrf-0", 165.5, 10.2)
+    cmd = seen["cmd"]
+    assert cmd[0] == "hackrf_sweep"
+    # The tool only accepts integer MHz, and the end must clear the requested top.
+    assert cmd[cmd.index("-f") + 1] == "160:171"
+    assert cmd[cmd.index("-w") + 1] == "100000"
+    assert "-1" in cmd
+
+
+def test_hackrf_sweep_bin_width_is_clamped_to_what_the_tool_accepts(monkeypatch):
+    seen = {}
+
+    def fake_run(cmd, *a, **kw):
+        seen["cmd"] = cmd
+        return subprocess.CompletedProcess(cmd, 0, SWEEP_LOW, "")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    spectrum_worker.configure(start_mhz=160, end_mhz=170, step_mhz=50)
+    spectrum_worker._hackrf_sweep_snapshot("hackrf-0", 165.0, 10.0)
+    assert seen["cmd"][seen["cmd"].index("-w") + 1] == "5000000"
+
+
+def test_capture_routes_a_hackrf_to_sweep_and_an_rtl_to_rtl_power(monkeypatch):
+    calls = []
+    monkeypatch.setattr(shutil, "which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(
+        type(spectrum_worker),
+        "_hackrf_sweep_snapshot",
+        lambda self, *a: calls.append("sweep"),
+    )
+    monkeypatch.setattr(
+        type(spectrum_worker),
+        "_rtl_power_snapshot",
+        lambda self, *a: calls.append("rtl_power"),
+    )
+    for device in ({"id": "hackrf-0", "type": "hackrf"}, {"id": "rtl-0", "type": "rtl-sdr"}):
+        monkeypatch.setattr(type(spectrum_worker), "_pick_scan_device", lambda self, d=device: d)
+        spectrum_worker._capture_once()
+    assert calls == ["sweep", "rtl_power"]
+
+
+def test_capture_falls_back_to_demo_when_no_sweep_tool_is_installed(monkeypatch):
+    monkeypatch.setattr(shutil, "which", lambda name: None)
+    monkeypatch.setattr(
+        type(spectrum_worker),
+        "_pick_scan_device",
+        lambda self: {"id": "hackrf-0", "type": "hackrf", "status": "online"},
+    )
+    snap = spectrum_worker._capture_once()
+    assert snap.source == "fallback-demo"
+    assert "hackrf_sweep" in snap.note
 
 
 # --------------------------------------------------------------------------

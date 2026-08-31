@@ -6,3 +6,5 @@ pydantic>=2.9.0
 pydantic-settings>=2.6.0
 aiosqlite>=0.20.0
 python-multipart>=0.0.12
+# Software demodulation for boards with no rtl_fm equivalent (see app/core/dsp.py).
+numpy>=1.26.0

@@ -46,11 +46,12 @@ def reset_singletons():
     dev_mod._device_cache = []
     dev_mod._device_cache_at = 0.0
     yield
+    from app.core.audio import audio_worker
     from app.core.decode import decode_worker
     from app.core.spectrum import spectrum_worker
     from app.core.wireless import wireless_worker
 
-    for w in (spectrum_worker, decode_worker, wireless_worker):
+    for w in (spectrum_worker, decode_worker, wireless_worker, audio_worker):
         try:
             w.stop()
         except Exception:
@@ -60,6 +61,9 @@ def reset_singletons():
         decode_worker._history.clear()
         decode_worker._current = None
         decode_worker._error = None
+    with audio_worker._lock:
+        audio_worker._listeners.clear()
+        audio_worker._error = None
 
 
 @pytest.fixture

@@ -304,6 +304,111 @@ def test_receivers_are_sorted_by_label(stub_directories):
     assert labels == sorted(labels, key=str.casefold)
 
 
+def test_parse_band_range_reads_coverage_as_mhz():
+    assert websdr.parse_band_range("1800000-30000000") == (1.8, 30.0)
+    assert websdr.parse_band_range("0-30000000") == (0.0, 30.0)
+
+
+def test_parse_band_range_rejects_what_it_cannot_trust():
+    assert websdr.parse_band_range("") is None
+    assert websdr.parse_band_range(None) is None
+    assert websdr.parse_band_range("0-30 MHz") is None
+    # An inverted or empty span tells us nothing, so it is treated as unpublished.
+    assert websdr.parse_band_range("30000000-1800000") is None
+    assert websdr.parse_band_range("30000000-30000000") is None
+
+
+def test_parsed_receivers_carry_numeric_coverage(stub_directories):
+    by_label = {r["label"]: r for r in websdr.list_receivers()["receivers"]}
+    berlin = by_label["Berlin, Germany"]
+    assert (berlin["band_lo_mhz"], berlin["band_hi_mhz"]) == (1.8, 30.0)
+    # Receiverbook publishes no coverage at all.
+    assert by_label["Bedford, England"]["band_lo_mhz"] is None
+
+
+def test_covers_frequency_separates_no_from_unknown():
+    kiwi = {"band_lo_mhz": 1.8, "band_hi_mhz": 30.0}
+    assert websdr.covers_frequency(kiwi, 14.2) is True
+    assert websdr.covers_frequency(kiwi, 1.8) is True, "the edges are inclusive"
+    assert websdr.covers_frequency(kiwi, 30.0) is True
+    assert websdr.covers_frequency(kiwi, 145.5) is False
+    assert websdr.covers_frequency({"url": "http://x.example"}, 14.2) is None
+
+
+def test_tune_url_speaks_each_receiver_dialect():
+    kiwi = {"url": "http://one.example:8073/", "type": "KiwiSDR"}
+    assert websdr.tune_url(kiwi, 14.2, "usb") == "http://one.example:8073/?f=14200usb"
+
+    owrx = {"url": "http://remote.example:8077/", "type": "OpenWebRX"}
+    assert websdr.tune_url(owrx, 145.5, "nbfm") == "http://remote.example:8077/#freq=145500000,mod=nfm"
+
+    web = {"url": "http://remote.example:8073/", "type": "WebSDR"}
+    assert websdr.tune_url(web, 7.1, "lsb") == "http://remote.example:8073/?tune=7100lsb"
+
+
+def test_tune_url_omits_a_mode_it_cannot_translate():
+    kiwi = {"url": "http://one.example:8073", "type": "KiwiSDR"}
+    assert websdr.tune_url(kiwi, 14.2) == "http://one.example:8073/?f=14200"
+    assert websdr.tune_url(kiwi, 14.2, "wbfm") == "http://one.example:8073/?f=14200"
+    owrx = {"url": "http://remote.example:8077", "type": "OpenWebRX"}
+    assert websdr.tune_url(owrx, 145.5, "nonsense") == "http://remote.example:8077/#freq=145500000"
+
+
+def test_tune_url_keeps_fractional_khz_and_trims_the_padding():
+    kiwi = {"url": "http://one.example:8073", "type": "KiwiSDR"}
+    assert websdr.tune_url(kiwi, 3.6993) == "http://one.example:8073/?f=3699.3"
+    assert websdr.tune_url(kiwi, 0.198) == "http://one.example:8073/?f=198"
+
+
+def test_tune_url_falls_back_rather_than_guessing_at_an_unknown_type():
+    other = {"url": "http://mystery.example/", "type": "Something Else"}
+    assert websdr.tune_url(other, 14.2, "usb") == "http://mystery.example/"
+
+
+def test_tune_url_refuses_a_scheme_the_picker_must_not_open():
+    for url in ("javascript:alert(1)", "file:///etc/passwd", "", None):
+        assert websdr.tune_url({"url": url, "type": "KiwiSDR"}, 14.2) is None
+
+
+def test_list_receivers_filters_by_coverage_and_counts_the_unknowns(stub_directories):
+    hf = websdr.list_receivers(freq_mhz=14.2)
+    assert {r["label"] for r in hf["receivers"]} == {"Berlin, Germany", "London, England"}
+    # The two Receiverbook entries publish no coverage, so they are reported not dropped.
+    assert hf["unknown_coverage"] == 2
+    assert hf["total"] == 4
+
+    lf = websdr.list_receivers(freq_mhz=0.5)
+    assert [r["label"] for r in lf["receivers"]] == ["London, England"]
+
+    assert websdr.list_receivers(freq_mhz=145.5)["count"] == 0
+
+
+def test_list_receivers_only_attaches_a_tune_url_when_tuning(stub_directories):
+    plain = websdr.list_receivers()
+    assert all("tune_url" not in r for r in plain["receivers"])
+
+    tuned = websdr.list_receivers(freq_mhz=14.2, mode="usb")
+    assert all(r["tune_url"].startswith("http") for r in tuned["receivers"])
+    assert all("f=14200usb" in r["tune_url"] for r in tuned["receivers"])
+
+
+def test_coverage_filter_composes_with_the_other_filters(stub_directories):
+    body = websdr.list_receivers(kind="KiwiSDR", query="berlin", freq_mhz=14.2)
+    assert [r["label"] for r in body["receivers"]] == ["Berlin, Germany"]
+
+
+def test_api_tunes_receivers_to_a_requested_frequency(client, stub_directories):
+    body = client.get("/api/websdr/receivers?freq_mhz=14.2&mode=usb").json()
+    assert body["count"] == 2
+    assert body["unknown_coverage"] == 2
+    assert all(r["tune_url"].endswith("?f=14200usb") for r in body["receivers"])
+
+
+def test_api_rejects_a_frequency_off_the_dial(client, stub_directories):
+    assert client.get("/api/websdr/receivers?freq_mhz=99999").status_code == 400
+    assert client.get("/api/websdr/receivers?freq_mhz=abc").status_code == 422
+
+
 def test_api_lists_receivers(client, stub_directories):
     body = client.get("/api/websdr/receivers").json()
     assert body["total"] == 4

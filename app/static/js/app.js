@@ -263,6 +263,7 @@ setInterval(() => {
   refreshDecode().catch(() => {});
   refreshWireless().catch(() => {});
   refreshBalance().catch(() => {});
+  refreshAudio().catch(() => {});
 }, 3000);
 
 async function refreshDecode() {
@@ -444,23 +445,21 @@ document.getElementById("known-mac-form")?.addEventListener("submit", async (ev)
 refreshWireless().catch(console.error);
 refreshKnownMacs().catch(console.error);
 
+function renderSlot(id, device, busy, role) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.textContent = device
+    ? `${device.name} (${device.id})${busy ? " · BUSY" : " · ready"}`
+    : `Unassigned — pick role ${role} or auto-assign`;
+}
+
 async function refreshBalance() {
   const res = await apiFetch("/api/devices/balance");
   const data = await res.json();
-  const scan = (data.scan && data.scan[0]) || null;
-  const dec = (data.decode && data.decode[0]) || null;
-  const sm = document.getElementById("slot-scan-meta");
-  const dm = document.getElementById("slot-decode-meta");
-  if (sm) {
-    sm.textContent = scan
-      ? scan.name + " (" + scan.id + ")" + (data.busy && data.busy.scan ? " · BUSY" : " · ready")
-      : "Unassigned — pick role scan or auto-assign";
-  }
-  if (dm) {
-    dm.textContent = dec
-      ? dec.name + " (" + dec.id + ")" + (data.busy && data.busy.decode ? " · BUSY" : " · ready")
-      : "Unassigned — pick role decode or auto-assign";
-  }
+  const busy = data.busy || {};
+  renderSlot("slot-scan-meta", (data.scan || [])[0], busy.scan, "scan");
+  renderSlot("slot-decode-meta", (data.decode || [])[0], busy.decode, "decode");
+  renderSlot("slot-audio-meta", (data.audio || [])[0], busy.audio, "audio");
 }
 
 document.getElementById("balance-apply")?.addEventListener("click", async () => {
@@ -539,7 +538,7 @@ function renderWebsdrDetail() {
   ].filter(([, v]) => v);
   box.className = "card websdr-detail";
   box.innerHTML =
-    `<p class="websdr-url"><code>${escapeHtml(r.url)}</code></p>` +
+    `<p class="websdr-url"><code>${escapeHtml(r.tune_url || r.url)}</code></p>` +
     rows
       .map(
         ([k, v]) =>
@@ -582,6 +581,9 @@ function renderWebsdrOptions() {
       .map(([k, n]) => `${k} ${n}`)
       .join(", ");
     if (byType) parts.push(byType);
+    if (websdrStatus.unknown_coverage) {
+      parts.push(`${websdrStatus.unknown_coverage} hidden with no published coverage`);
+    }
     parts.push(`updated ${websdrAge(websdrStatus.age_s)}`);
     if (websdrStatus.stale) {
       parts.push(`cached copy — ${websdrStatus.degraded_reason || "directory unreachable"}`);
@@ -595,12 +597,24 @@ function renderWebsdrOptions() {
   renderWebsdrDetail();
 }
 
+/** Coverage lives server-side, so a frequency filter means a refetch. */
+function websdrQuery() {
+  const params = new URLSearchParams({ limit: "2000" });
+  const freq = Number(document.getElementById("websdr-freq")?.value);
+  if (Number.isFinite(freq) && freq > 0) {
+    params.set("freq_mhz", String(freq));
+    const mode = document.getElementById("websdr-mode")?.value || "";
+    if (mode) params.set("mode", mode);
+  }
+  return params.toString();
+}
+
 async function refreshWebsdr() {
   const panel = document.getElementById("websdr-panel");
   if (!panel) return;
   const meta = document.getElementById("websdr-meta");
   try {
-    const res = await apiFetch("/api/websdr/receivers?limit=2000");
+    const res = await apiFetch(`/api/websdr/receivers?${websdrQuery()}`);
     if (res.status === 404) {
       panel.remove();
       return;
@@ -623,12 +637,22 @@ document.getElementById("websdr-type")?.addEventListener("change", renderWebsdrO
 document.getElementById("websdr-search")?.addEventListener("input", renderWebsdrOptions);
 document.getElementById("websdr-select")?.addEventListener("change", renderWebsdrDetail);
 
+let websdrRefetch = null;
+function scheduleWebsdrRefetch() {
+  clearTimeout(websdrRefetch);
+  websdrRefetch = setTimeout(() => refreshWebsdr().catch(console.error), 350);
+}
+document.getElementById("websdr-freq")?.addEventListener("input", scheduleWebsdrRefetch);
+document.getElementById("websdr-mode")?.addEventListener("change", scheduleWebsdrRefetch);
+
 document.getElementById("websdr-form")?.addEventListener("submit", (ev) => {
   ev.preventDefault();
   const sel = document.getElementById("websdr-select");
   const r = websdrReceivers.find((x) => x.id === sel?.value);
-  if (!r || !isHttpUrl(r.url)) return;
-  window.open(r.url, "_blank", "noopener,noreferrer");
+  if (!r) return;
+  const target = r.tune_url || r.url;
+  if (!isHttpUrl(target)) return;
+  window.open(target, "_blank", "noopener,noreferrer");
 });
 
 document.getElementById("websdr-refresh")?.addEventListener("click", async () => {
@@ -648,6 +672,113 @@ document.getElementById("websdr-refresh")?.addEventListener("click", async () =>
 });
 
 refreshWebsdr().catch(console.error);
+
+let audioModesFilled = false;
+
+function audioFields() {
+  return {
+    freq_mhz: Number(document.getElementById("audio-freq").value),
+    mode: document.getElementById("audio-mode").value,
+    gain: Number(document.getElementById("audio-gain").value),
+    squelch: Number(document.getElementById("audio-squelch").value),
+  };
+}
+
+/** A fresh URL each time, so the element never replays a cached stream. */
+function attachAudioPlayer() {
+  const player = document.getElementById("audio-player");
+  if (!player) return;
+  player.src = `/api/audio/stream?t=${Date.now()}`;
+  player.load();
+  const started = player.play();
+  if (started) started.catch(() => {});
+}
+
+function detachAudioPlayer() {
+  const player = document.getElementById("audio-player");
+  if (!player) return;
+  player.pause();
+  player.removeAttribute("src");
+  player.load();
+}
+
+function fillAudioModes(modes) {
+  const sel = document.getElementById("audio-mode");
+  if (!sel || audioModesFilled || !modes || !modes.length) return;
+  const current = sel.value;
+  sel.innerHTML = modes
+    .map((m) => `<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`)
+    .join("");
+  if (modes.includes(current)) sel.value = current;
+  audioModesFilled = true;
+}
+
+function audioSummary(data) {
+  if (!data.running) return `Idle${data.error ? " · " + data.error : ""}`;
+  const bits = [
+    `${data.freq_mhz} MHz ${data.mode}`,
+    `${data.backend} (${data.backend_reason})`,
+    `${data.audio_rate} Hz`,
+    `${data.listeners}/${data.max_listeners} listening`,
+  ];
+  if (data.squelched) bits.push("squelched");
+  if (data.dropped_chunks) bits.push(`${data.dropped_chunks} chunks dropped`);
+  if (data.error) bits.push("ERROR: " + data.error);
+  return bits.join(" · ");
+}
+
+async function refreshAudio() {
+  const panel = document.getElementById("audio-panel");
+  if (!panel) return;
+  const res = await apiFetch("/api/audio");
+  const data = await res.json();
+  fillAudioModes(data.modes);
+  const meta = document.getElementById("audio-meta");
+  const status = document.getElementById("audio-status");
+  if (status) status.textContent = JSON.stringify(data, null, 2);
+  if (meta) meta.textContent = audioSummary(data);
+}
+
+async function postAudio(path, body) {
+  const meta = document.getElementById("audio-meta");
+  const res = await apiFetch(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body || {}),
+  });
+  if (!res.ok) {
+    const payload = await res.json().catch(() => ({}));
+    if (meta) meta.textContent = `Failed — ${payload.detail || "HTTP " + res.status}`;
+    return null;
+  }
+  return res.json();
+}
+
+document.getElementById("audio-start")?.addEventListener("click", async () => {
+  const data = await postAudio("/api/audio/start", audioFields());
+  if (data && data.running) attachAudioPlayer();
+  await refreshAudio();
+  await refreshEvents();
+});
+
+document.getElementById("audio-stop")?.addEventListener("click", async () => {
+  detachAudioPlayer();
+  await postAudio("/api/audio/stop", {});
+  await refreshAudio();
+  await refreshEvents();
+});
+
+document.getElementById("audio-form")?.addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  // Retuning restarts the radio, which ends the stream the player is holding.
+  detachAudioPlayer();
+  const data = await postAudio("/api/audio/config", audioFields());
+  if (data && data.running) attachAudioPlayer();
+  await refreshAudio();
+  await refreshEvents();
+});
+
+refreshAudio().catch(console.error);
 
 async function fillDecodeModes() {
   const sel = document.getElementById("dec-mode");

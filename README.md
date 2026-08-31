@@ -91,12 +91,13 @@ Detailed Pi walkthrough: [INSTALL.md](INSTALL.md) · Hardening: [SECURITY.md](SE
 
 ## Features
 
-- **Multi-SDR management** — RTL-SDR, HackRF, Soapy; role assignment (scan / decode / idle)
-- **Live spectrum** — waterfall, peak detect, band classification, event log
+- **Multi-SDR management** — RTL-SDR, HackRF, Soapy; role assignment (scan / decode / audio / idle)
+- **Live spectrum** — waterfall, peak detect, band classification, event log; real sweeps via `rtl_power` and `hackrf_sweep`
+- **Live audio** — tune a local stick and listen in the browser (NBFM, WBFM, AM, USB, LSB, CW)
 - **Digital decode** — POCSAG, FLEX, DMR, P25, NXDN, and more
 - **Load balancing** — auto-assign sticks (RTL scan, HackRF decode)
 - **Wireless catalog** — WiFi + Bluetooth observation, OUI lookup, known MAC tagging
-- **Public WebSDR picker** — pick from ~1900 KiwiSDR / OpenWebRX / WebSDR receivers worldwide
+- **Public WebSDR picker** — pick from ~1900 KiwiSDR / OpenWebRX / WebSDR receivers worldwide, tuned to the frequency you are looking at
 - **Optional LAN auth** — password gate for shared networks
 
 ---
@@ -105,8 +106,8 @@ Detailed Pi walkthrough: [INSTALL.md](INSTALL.md) · Hardening: [SECURITY.md](SE
 
 | Device | Role |
 |--------|------|
-| RTL-SDR v3/v4 | Spectrum scan, paging decode |
-| HackRF One | Wideband decode, second channel |
+| RTL-SDR v3/v4 | Spectrum scan, paging decode, live audio |
+| HackRF One | Wideband sweep, decode, live audio (software demodulated) |
 | Pi built-in WiFi/BT | Wireless catalog |
 | USB WiFi dongle (optional) | Dedicated monitor interface |
 
@@ -154,10 +155,50 @@ Pi-Spy-RF/
 | `POST /api/spectrum/start` | Start spectrum worker |
 | `POST /api/decode/start` | Start decode worker |
 | `GET /api/decode/modes` | Supported digital modes |
-| `GET /api/websdr/receivers` | Public receiver directory (`kind`, `q`, `limit`) |
+| `GET /api/audio` | Audio worker state, backend and modes |
+| `POST /api/audio/start` | Start listening (`freq_mhz`, `mode`, `gain`, `squelch`) |
+| `POST /api/audio/config` | Retune or adjust gain/squelch without a restart |
+| `POST /api/audio/stop` | Stop listening and release the radio |
+| `GET /api/audio/stream` | Live WAV stream for the browser player |
+| `GET /api/websdr/receivers` | Public receiver directory (`kind`, `q`, `limit`, `freq_mhz`, `mode`) |
 | `POST /api/websdr/refresh` | Re-fetch the receiver directory |
 
 Interactive docs: `http://<host>:8080/docs`
+
+---
+
+## Live audio
+
+The **Live audio** panel tunes whichever stick holds `role=audio` and streams the
+demodulated result to the browser as WAV. Set a frequency, pick a mode, and press play;
+gain and squelch can be changed while it runs.
+
+The role is exclusive — one radio cannot scan and demodulate at the same time — so with a
+single stick you will be asked to free it first. Auto-assign gives spectrum priority.
+
+Which backend runs depends on the hardware and what is installed:
+
+| Radio | Backend | Needs |
+|-------|---------|-------|
+| RTL-SDR | `rtl_fm` | `rtl-sdr` (installed by `install.sh`) |
+| Any Soapy device | `rx_fm` | [`rx_tools`](https://github.com/rxseger/rx_tools), built from source |
+| HackRF | in-process demodulation of `hackrf_transfer` IQ | `hackrf` + `numpy` |
+| None of the above | demo tone | nothing, so the UI is testable offline |
+
+HackRF has no packaged `rtl_fm` equivalent, so its raw IQ is captured at `sample_rate`
+and demodulated in Python with numpy. That path is the reason `sample_rate` in the config
+below cannot go under 2 MS/s: the hardware refuses to.
+
+```yaml
+audio:
+  enabled: true
+  sample_rate: 2000000       # HackRF capture rate; audio comes out at rate / 40
+  output_rate: 48000         # rtl_fm / rx_fm output rate
+  max_listeners: 4           # browsers sharing the one radio
+```
+
+The stream is served from the dashboard's own origin, never compressed, and never
+embedded from a third party, so the strict Content-Security-Policy stays intact.
 
 ---
 
@@ -166,6 +207,11 @@ Interactive docs: `http://<host>:8080/docs`
 The **Public WebSDR receivers** panel lets you pick a receiver from a dropdown and open
 it in a new tab — useful for checking whether a signal you are seeing locally is also
 audible somewhere far away.
+
+Enter a frequency and the list narrows to receivers that publish coverage of it, and each
+link deep-tunes the far end: `?f=` for KiwiSDR, `#freq=` for OpenWebRX, `?tune=` for
+WebSDR. Receivers open in a new tab rather than an iframe, which those sites forbid and
+the dashboard's CSP would block anyway.
 
 The list is merged from two directories, the same pair the
 [God's Ear](https://github.com/Sid3b00m/gods-ear) console uses:

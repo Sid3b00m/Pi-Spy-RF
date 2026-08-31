@@ -147,7 +147,8 @@ After the web UI loads:
 2. **SDR load balance** — Click **Auto-assign** (RTL → scan, HackRF → decode)
 3. **Spectrum** — Start spectrum worker; watch live canvas / waterfall
 4. **Decode** — Start decode worker; POCSAG/FLEX need `multimon-ng` (installed by default)
-5. **WiFi / Bluetooth** — Start wireless scan; edit known MACs as needed
+5. **Live audio** — Give a stick `role=audio`, tune a local repeater, press play
+6. **WiFi / Bluetooth** — Start wireless scan; edit known MACs as needed
 
 API health check:
 
@@ -204,6 +205,44 @@ dsd_fme -h
 ```
 
 Pi-Spy-RF auto-detects `dsd_fme` or legacy `dsd` on PATH.
+
+---
+
+## Live audio backends
+
+The **Live audio** panel needs a radio holding `role=audio`. Which demodulator runs is
+chosen from the hardware and what is on PATH, in this order:
+
+| Radio | Backend | Comes from |
+|-------|---------|------------|
+| RTL-SDR | `rtl_fm` | `rtl-sdr`, installed above |
+| Soapy device | `rx_fm` | `rx_tools`, built by hand |
+| HackRF | `hackrf_transfer` piped into an in-process numpy demodulator | `hackrf`, installed above |
+| Nothing detected | demo tone | built in, so the panel is testable with no radio |
+
+So an RTL dongle or a HackRF needs nothing extra. **rx_tools** is only worth building if
+you have a radio that speaks Soapy but has no native tool — an Airspy or SDRplay, say:
+
+```bash
+sudo apt install -y build-essential cmake libsoapysdr-dev
+git clone https://github.com/rxseger/rx_tools.git
+cd rx_tools
+mkdir build && cd build
+cmake ..
+make -j$(nproc)
+sudo make install
+```
+
+Verify, then restart the service so the new tool is picked up:
+
+```bash
+rx_fm --help
+sudo systemctl restart pi-spy-rf
+```
+
+The HackRF path decodes IQ in Python. On a Pi 4 that costs roughly a third of one core at
+the default 2 MS/s; on a Pi 3 prefer an RTL dongle for listening and leave the HackRF to
+sweep. Nothing here is needed for the WebSDR picker, which only opens a browser tab.
 
 ---
 

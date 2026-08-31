@@ -1,14 +1,17 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from app import __version__
+from app.core.audio import audio_worker, is_enabled as audio_enabled
 from app.core.bandplan import classify_mhz, list_bands
 from app.core.balance import assignments, assign_exclusive, auto_balance
 from app.core.db import add_event, list_events
 from app.core.decode import decode_worker
 from app.core.modes import SUPPORTED_MODES, list_modes
+from app.core.security import clamp_freq_mhz
 from app.core.devices import VALID_ROLES, host_info, list_radio_devices, list_tools
 from app.core.mac_db import (
     delete_known_mac,
@@ -65,6 +68,15 @@ class DecodeEnqueue(BaseModel):
     duration_s: float = 8.0
 
 
+class AudioConfig(BaseModel):
+    freq_mhz: float | None = None
+    mode: str | None = None
+    gain: float | None = None
+    squelch: float | None = None
+    device_id: str | None = None
+    sample_rate: int | None = None
+
+
 class WirelessConfig(BaseModel):
     interval_s: float | None = None
     wifi_enabled: bool | None = None
@@ -118,9 +130,11 @@ def devices_balance():
     plan = assignments()
     spec = spectrum_worker.status()
     dec = decode_worker.status()
+    aud = audio_worker.status()
     plan["busy"] = {
         "scan": spec.get("device_id") if spec.get("running") else None,
         "decode": dec.get("device_id") if dec.get("running") else None,
+        "audio": aud.get("device_id") if aud.get("running") else None,
     }
     return plan
 
@@ -133,9 +147,11 @@ def devices_balance_apply():
     plan = auto_balance()
     spec = spectrum_worker.status()
     dec = decode_worker.status()
+    aud = audio_worker.status()
     plan["busy"] = {
         "scan": spec.get("device_id") if spec.get("running") else None,
         "decode": dec.get("device_id") if dec.get("running") else None,
+        "audio": aud.get("device_id") if aud.get("running") else None,
     }
     return plan
 
@@ -230,6 +246,60 @@ def decode_enqueue(body: DecodeEnqueue):
     }
 
 
+@router.get("/audio")
+def audio_status():
+    return audio_worker.status()
+
+
+@router.post("/audio/config")
+def audio_config(body: AudioConfig):
+    """Retunes in place; the radio is restarted only if it was already running."""
+    try:
+        return audio_worker.retune(**body.model_dump(exclude_none=True))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@router.post("/audio/start")
+def audio_start(body: AudioConfig | None = None):
+    if not audio_enabled():
+        raise HTTPException(404, "audio is disabled in config")
+    if body:
+        try:
+            audio_worker.configure(**body.model_dump(exclude_none=True))
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+    return audio_worker.start()
+
+
+@router.post("/audio/stop")
+def audio_stop():
+    return audio_worker.stop()
+
+
+@router.get("/audio/stream")
+def audio_stream():
+    if not audio_enabled():
+        raise HTTPException(404, "audio is disabled in config")
+    if not audio_worker.status()["running"]:
+        raise HTTPException(409, "audio worker is not running; start it first")
+    try:
+        listener = audio_worker.subscribe()
+    except RuntimeError as exc:
+        raise HTTPException(429, str(exc)) from exc
+    return StreamingResponse(
+        audio_worker.stream(listener),
+        media_type="audio/wav",
+        headers={
+            "Cache-Control": "no-store",
+            # GZipMiddleware leaves a response alone once it declares an encoding.
+            # Compressing a live stream would buffer it into silence.
+            "Content-Encoding": "identity",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
 @router.get("/wireless")
 def wireless_status():
     return wireless_worker.status()
@@ -261,15 +331,33 @@ def wireless_devices(kind: str | None = None, limit: int = 100):
 
 
 @router.get("/websdr/receivers")
-def websdr_receivers(kind: str | None = None, q: str | None = None, limit: int = 1000):
-    """Public receiver directory for the picker. Served from cache between refreshes."""
+def websdr_receivers(
+    kind: str | None = None,
+    q: str | None = None,
+    limit: int = 1000,
+    freq_mhz: float | None = None,
+    mode: str | None = None,
+):
+    """Public receiver directory for the picker. Served from cache between refreshes.
+
+    Passing freq_mhz narrows the list to receivers that publish coverage of that
+    frequency, and adds a tune_url that deep-links each one straight to it.
+    """
     if not websdr_enabled():
         raise HTTPException(404, "websdr is disabled in config")
     limit = max(1, min(limit, 2000))
     kind = (kind or "").strip()[:32] or None
     query = (q or "").strip()[:64] or None
+    tune_mode = (mode or "").strip().lower()[:8] or None
+    if freq_mhz is not None:
+        try:
+            freq_mhz = clamp_freq_mhz(freq_mhz)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
     try:
-        return websdr_list(kind=kind, query=query, limit=limit)
+        return websdr_list(
+            kind=kind, query=query, limit=limit, freq_mhz=freq_mhz, mode=tune_mode
+        )
     except WebSdrUnavailable as exc:
         raise HTTPException(503, str(exc)) from exc
 

@@ -13,7 +13,7 @@ from typing import Any
 from app.core.db import get_device_roles
 
 
-VALID_ROLES = ("scan", "decode", "wifi", "bluetooth", "idle")
+VALID_ROLES = ("scan", "decode", "audio", "wifi", "bluetooth", "idle")
 
 
 @dataclass
@@ -173,6 +173,8 @@ def list_tools() -> dict[str, bool]:
         "rtl_fm",
         "hackrf_info",
         "hackrf_sweep",
+        "hackrf_transfer",
+        "rx_fm",
         "SoapySDRUtil",
         "multimon-ng",
         "dsd",

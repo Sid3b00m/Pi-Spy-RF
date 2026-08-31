@@ -35,6 +35,7 @@ class AppConfig(BaseModel):
     bluetooth: dict[str, Any] = Field(default_factory=dict)
     mac_db: dict[str, Any] = Field(default_factory=dict)
     decode: dict[str, Any] = Field(default_factory=dict)
+    audio: dict[str, Any] = Field(default_factory=dict)
     websdr: dict[str, Any] = Field(default_factory=dict)
 
 

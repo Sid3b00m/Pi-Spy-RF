@@ -57,6 +57,12 @@ _TRAILING_COMMA_RE = re.compile(r",(\s*)\]$")
 # Plenty of operators leave the town field set to their GPS pair.
 _COORD_ONLY_RE = re.compile(r"^\(\s*-?\d+(?:\.\d+)?\s*,\s*-?\d+(?:\.\d+)?\s*\)$")
 
+# Every receiver family spells "tune here" differently, and none of them agree
+# on units either. Our own mode names are the keys.
+_KIWI_MODE = {"nbfm": "nbfm", "am": "am", "usb": "usb", "lsb": "lsb", "cw": "cw"}
+_OWRX_MODE = {"nbfm": "nfm", "wbfm": "wfm", "am": "am", "usb": "usb", "lsb": "lsb", "cw": "cw"}
+_WEBSDR_MODE = {"nbfm": "fm", "am": "am", "usb": "usb", "lsb": "lsb", "cw": "cw"}
+
 
 class WebSdrUnavailable(RuntimeError):
     """No directory could be fetched and no cache is recent enough to stand in."""
@@ -109,6 +115,41 @@ def format_bands(bands: Any) -> str | None:
     if not match:
         return None
     return f"{_fmt_mhz(match.group(1))}-{_fmt_mhz(match.group(2))} MHz"
+
+
+def parse_band_range(bands: Any) -> tuple[float, float] | None:
+    '''The same span as numbers in MHz, so a frequency can be matched against it.'''
+    match = _BANDS_RE.match(str(bands or "").strip())
+    if not match:
+        return None
+    lo = float(match.group(1)) / 1e6
+    hi = float(match.group(2)) / 1e6
+    return (lo, hi) if hi > lo else None
+
+
+def tune_url(receiver: dict[str, Any], freq_mhz: float, mode: str | None = None) -> str | None:
+    '''Deep-link straight to a frequency, in whichever syntax the software uses.
+
+    An unrecognised receiver type falls back to the plain site URL rather than
+    guessing at a query string the far end will not understand.
+    '''
+    url = str((receiver or {}).get("url") or "")
+    if not url.lower().startswith(("http://", "https://")):
+        return None
+    kind = str((receiver or {}).get("type") or "").casefold()
+    base = url.rstrip("/")
+    wanted = (mode or "").strip().lower()
+    khz = f"{float(freq_mhz) * 1000.0:.2f}".rstrip("0").rstrip(".")
+
+    if "kiwi" in kind:
+        return f"{base}/?f={khz}{_KIWI_MODE.get(wanted, '')}"
+    if "openwebrx" in kind:
+        hz = int(round(float(freq_mhz) * 1e6))
+        mod = _OWRX_MODE.get(wanted)
+        return f"{base}/#freq={hz}" + (f",mod={mod}" if mod else "")
+    if "websdr" in kind:
+        return f"{base}/?tune={khz}{_WEBSDR_MODE.get(wanted, '')}"
+    return url
 
 
 def _to_count(value: Any) -> int | None:
@@ -168,6 +209,7 @@ def parse_kiwi_list(text: str) -> list[dict[str, Any]]:
             continue
         location = _place(entry.get("loc"))
         name = _clean(entry.get("name")) or location or "KiwiSDR"
+        coverage = parse_band_range(entry.get("bands"))
         receivers.append(
             {
                 "type": "KiwiSDR",
@@ -179,6 +221,8 @@ def parse_kiwi_list(text: str) -> list[dict[str, Any]]:
                 "users": _to_count(entry.get("users")),
                 "users_max": _to_count(entry.get("users_max")),
                 "bands": format_bands(entry.get("bands")),
+                "band_lo_mhz": coverage[0] if coverage else None,
+                "band_hi_mhz": coverage[1] if coverage else None,
                 "antenna": _clean(entry.get("antenna")),
                 "snr": _clean(entry.get("snr")),
                 "source": "kiwisdr-mirror",
@@ -231,6 +275,8 @@ def parse_receiverbook(html: str) -> list[dict[str, Any]]:
                     "users": None,
                     "users_max": None,
                     "bands": None,
+                    "band_lo_mhz": None,
+                    "band_hi_mhz": None,
                     "antenna": None,
                     "snr": None,
                     "version": _clean(receiver.get("version")),
@@ -440,12 +486,23 @@ def get_catalog(*, force: bool = False) -> dict[str, Any]:
             raise WebSdrUnavailable(str(exc)) from exc
 
 
+def covers_frequency(receiver: dict[str, Any], freq_mhz: float) -> bool | None:
+    """True, False, or None when the directory never published a coverage range."""
+    lo = (receiver or {}).get("band_lo_mhz")
+    hi = (receiver or {}).get("band_hi_mhz")
+    if lo is None or hi is None:
+        return None
+    return float(lo) <= float(freq_mhz) <= float(hi)
+
+
 def list_receivers(
     *,
     kind: str | None = None,
     query: str | None = None,
     limit: int = 500,
     force: bool = False,
+    freq_mhz: float | None = None,
+    mode: str | None = None,
 ) -> dict[str, Any]:
     """Catalog filtered down for the dashboard picker."""
     catalog = get_catalog(force=force)
@@ -463,9 +520,27 @@ def list_receivers(
             or needle in str(r.get("name") or "").casefold()
         ]
 
+    # Only the Kiwi mirror publishes coverage, and a cache written before this
+    # existed has none at all, so the count is reported rather than hidden.
+    unknown_coverage = 0
+    if freq_mhz is not None:
+        covering = []
+        for receiver in receivers:
+            verdict = covers_frequency(receiver, freq_mhz)
+            if verdict is None:
+                unknown_coverage += 1
+            elif verdict:
+                covering.append(receiver)
+        receivers = covering
+
+    page = receivers[:limit]
+    if freq_mhz is not None:
+        page = [{**r, "tune_url": tune_url(r, freq_mhz, mode)} for r in page]
+
     return {
-        "receivers": receivers[:limit],
+        "receivers": page,
         "count": len(receivers),
+        "unknown_coverage": unknown_coverage,
         "total": catalog["count"],
         "by_type": catalog["by_type"],
         "sources": catalog["sources"],

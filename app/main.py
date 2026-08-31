@@ -24,6 +24,7 @@ from app.core.auth import (
     session_valid,
     verify_login,
 )
+from app.core.audio import audio_worker, is_enabled as audio_enabled
 from app.core.bandplan import list_bands
 from app.core.config import ROOT, get_config
 from app.core.db import init_db, list_events
@@ -121,6 +122,8 @@ def dashboard(request: Request):
         "events": list_events(30),
         "spectrum": spectrum_worker.status(),
         "decode": decode_worker.status(),
+        "audio": audio_worker.status(),
+        "audio_on": audio_enabled(),
         "wireless": wireless_worker.status(),
         "wifi_devices": list_wireless("wifi", 50),
         "bt_devices": list_wireless("bluetooth", 50),

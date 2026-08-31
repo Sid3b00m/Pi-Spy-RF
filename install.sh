@@ -131,6 +131,8 @@ if [[ "$INSTALL_RF_TOOLS" == "1" && $EUID -eq 0 ]]; then
 
   log "Optional: install dsd-fme for DMR/P25/NXDN live decode"
   log "  See INSTALL.md - Digital voice decode (DSD)"
+  log "Optional: install rx_tools for live audio from Soapy-only radios"
+  log "  See INSTALL.md - Live audio backends"
 elif [[ "$INSTALL_RF_TOOLS" == "1" && $EUID -ne 0 ]]; then
   log "Skipping system packages (not root). Re-run as: sudo ./install.sh"
 fi

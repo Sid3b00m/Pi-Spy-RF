@@ -189,6 +189,17 @@ th { color: var(--muted); font-weight: 600; }
   grid-template-columns: 1fr 1fr;
   gap: 0.75rem;
 }
+/* Role slots: one card per exclusive role, so the count grows without a reflow. */
+.slots {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+  gap: 0.75rem;
+}
+.audio-player {
+  width: 100%;
+  margin: 0.5rem 0 0.25rem;
+  border-radius: 10px;
+}
 .mini { margin: 0 0 0.4rem; font-size: 0.95rem; }
 label { color: var(--muted); font-size: 0.85rem; display: inline-flex; gap: 0.35rem; align-items: center; }
 @media (max-width: 900px) {
