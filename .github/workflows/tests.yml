@@ -16,7 +16,8 @@ jobs:
       # exercise, so static analysis is the safety net.
       - name: Check shell scripts
         run: |
-          shellcheck --shell=bash --severity=style install.sh run.sh
+          shellcheck --shell=bash --severity=style install.sh run.sh \
+            scripts/usbip-attach.sh scripts/usbip-detach.sh
           shellcheck --shell=bash --severity=style \
             --exclude=SC2034,SC2154 scripts/pi-spy-rf.openrc
 

@@ -197,6 +197,54 @@ Two important limits:
 
 Reach the dashboard from Windows at <http://127.0.0.1:8080> — WSL2 forwards localhost automatically.
 
+### Hyper-V guests and other machines (USB/IP)
+
+Hyper-V has no generic USB passthrough: Discrete Device Assignment is PCIe-only, and Enhanced Session Mode does not carry SDR bulk transfers. USB/IP is the way in, and the same approach works for any Linux machine that is not the one holding the dongle.
+
+On the Windows host, install [usbipd-win](https://github.com/dorssel/usbipd-win), then find and share the radio:
+
+```powershell
+usbipd list
+usbipd bind --busid 1-11
+```
+
+`bind` persists across reboots, and the installer's firewall rule already allows TCP 3240 from `LocalSubnet`, which covers an internal Hyper-V switch.
+
+**Check the guest kernel before you start.** An imported device needs `vhci-hcd`, and trimmed kernels drop it:
+
+```bash
+find /lib/modules/"$(uname -r)" -name 'vhci*hcd*'
+```
+
+Arch and most general-purpose kernels are fine. Debian's `-cloud` kernel has no USB support at all — not even `/sys/bus/usb` — and Alpine's `-virt` kernel ships no usbip modules. If the search prints nothing, install a general-purpose kernel (`linux-image-amd64` on Debian, `linux-lts` on Alpine) and reboot the guest.
+
+Then attach from the guest:
+
+```bash
+sudo pacman -S usbip usbutils          # Arch; the package is "usbip" on Debian and Fedora
+sudo modprobe vhci-hcd
+sudo usbip attach -r 192.168.0.10 -b 1-11
+hackrf_info
+```
+
+`usbipd bind` persists but `usbip attach` does not, so to survive a reboot use the supplied unit:
+
+```bash
+chmod +x scripts/usbip-attach.sh scripts/usbip-detach.sh
+sudo tee /etc/pi-spy-rf-usbip.env >/dev/null <<'EOF'
+USBIP_HOST=192.168.0.10
+USBIP_BUSID=1-11
+EOF
+sudo cp scripts/pi-spy-rf-usbip.service /etc/systemd/system/
+sudo systemctl enable --now pi-spy-rf-usbip
+```
+
+The `chmod` matters: systemd fails an `ExecStart` that is not executable with `203/EXEC`, and the repo ships shell scripts non-executable.
+
+Edit the paths in the unit if you did not clone to `/home/pi/Pi-Spy-RF`. It retries for two minutes, because a guest usually boots before the host is serving and a host that just released the device needs a moment to re-export it. It is ordered before `pi-spy-rf.service` so the radio is present the first time the app probes.
+
+Throughput is rarely the limit: a HackRF sustains 8 Msps (15.5 MB/s) over an internal Hyper-V switch. Across a physical NIC, expect to run out of bandwidth well before 20 Msps.
+
 ### LAN access and firewall
 
 To reach the dashboard from other devices, enable auth first, then allow the port:

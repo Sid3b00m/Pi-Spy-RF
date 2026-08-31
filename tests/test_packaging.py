@@ -21,6 +21,9 @@ SHELL_FILES = [
     "scripts/pi-spy-rf.openrc",
     "scripts/pi-spy-rf.service",
     "scripts/60-pi-spy-rf-sdr.rules",
+    "scripts/usbip-attach.sh",
+    "scripts/usbip-detach.sh",
+    "scripts/pi-spy-rf-usbip.service",
 ]
 
 
@@ -31,9 +34,27 @@ def test_unix_line_endings(name):
     assert b"\r\n" not in raw, f"{name} has CRLF line endings"
 
 
-@pytest.mark.parametrize("name", ["install.sh", "run.sh", "scripts/pi-spy-rf.openrc"])
+@pytest.mark.parametrize(
+    "name",
+    [
+        "install.sh",
+        "run.sh",
+        "scripts/pi-spy-rf.openrc",
+        "scripts/usbip-attach.sh",
+        "scripts/usbip-detach.sh",
+    ],
+)
 def test_has_shebang(name):
     assert (ROOT / name).read_bytes().startswith(b"#!"), f"{name} lacks a shebang"
+
+
+def test_usbip_unit_runs_the_shipped_scripts():
+    """The unit calls the scripts by path; a rename would break it silently."""
+    unit = (ROOT / "scripts/pi-spy-rf-usbip.service").read_text(encoding="utf-8")
+    for action, script in (("ExecStart", "usbip-attach.sh"), ("ExecStop", "usbip-detach.sh")):
+        assert f"{action}=" in unit, f"the unit has no {action}"
+        assert script in unit, f"{action} no longer points at {script}"
+        assert (ROOT / "scripts" / script).exists(), f"scripts/{script} is missing"
 
 
 def test_referenced_script_files_exist():

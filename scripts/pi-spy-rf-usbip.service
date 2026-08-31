@@ -1,0 +1,24 @@
+[Unit]
+Description=Attach a USB/IP SDR exported by a remote usbip server
+Documentation=https://github.com/dorssel/usbipd-win
+After=network-online.target
+Wants=network-online.target
+# Pi-Spy-RF enumerates radios by running hackrf_info and rtl_test, so the
+# device has to arrive before the app starts probing.
+Before=pi-spy-rf.service
+
+[Service]
+Type=oneshot
+# The attach outlives ExecStart, so the unit has to stay active to own it and
+# to have its ExecStop run on shutdown.
+RemainAfterExit=yes
+# USBIP_HOST and USBIP_BUSID. Optional (the leading dash) so a missing file
+# leaves the scripts to report what is unset rather than failing opaquely.
+EnvironmentFile=-/etc/pi-spy-rf-usbip.env
+ExecStart=/home/pi/Pi-Spy-RF/scripts/usbip-attach.sh
+ExecStop=/home/pi/Pi-Spy-RF/scripts/usbip-detach.sh
+# Must exceed USBIP_ATTEMPTS * USBIP_RETRY_SECONDS in usbip-attach.sh.
+TimeoutStartSec=180
+
+[Install]
+WantedBy=multi-user.target
